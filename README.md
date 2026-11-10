@@ -1,11 +1,13 @@
 # Сборки MeshCore
 
-Каталог прошивок для стационарных LoRa-репитеров. Первый предварительный выпуск основан на MeshCore 1.18.0. [Файлы выпусков](https://github.com/serggend/meshcore-builds/releases)
+Каталог прошивок для стационарных LoRa-репитеров. Первый предварительный выпуск основан на MeshCore 1.18.0. [Все выпуски](https://github.com/serggend/meshcore-builds/releases)
 
-| Плата | Что умеет | Файлы |
+| Плата | Что умеет | Скачать v0.1.0-preview.1 |
 | --- | --- | --- |
-| Heltec WiFi LoRa 32 V4 с OLED | Ретрансляция MeshCore, USB-консоль, Wi-Fi для MeshDash, BLE-терминал | `heltec-v4-oled-repeater-connect-merged.bin` для первой установки, `heltec-v4-oled-repeater-connect-app.bin` для обновления |
-| FakeTec V4 с ProMicro nRF52840 и HT-RA62 | Ретрансляция MeshCore, USB-консоль, BLE-терминал. Экран SSD1306 опционален | `faketec-v4-repeater-connect.uf2` |
+| Heltec WiFi LoRa 32 V4 с OLED | Ретрансляция MeshCore, USB-консоль, Wi-Fi для MeshDash, BLE-терминал | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-app.bin) |
+| FakeTec V4 с ProMicro nRF52840 и HT-RA62 | Ретрансляция MeshCore, USB-консоль, BLE-терминал. Экран SSD1306 опционален | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/faketec-v4-repeater-connect.uf2) |
+
+[Контрольные суммы SHA-256](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [Инструкция по установке](#установка-и-откат)
 
 По USB доступны штатные команды настройки репитера. Текстовая консоль BLE и TCP на Heltec дают доступ к статистике, объявлениям и обмену сообщениями Public. Для очередей Public и объявлений используй один экземпляр MeshDash на плату. У FakeTec в этой конфигурации есть USB и BLE.
 
