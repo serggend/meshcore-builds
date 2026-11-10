@@ -1,0 +1,1145 @@
+diff --git a/examples/companion_radio/DataStore.cpp b/examples/companion_radio/DataStore.cpp
+index 06c56a7..25c1fcc 100644
+--- a/examples/companion_radio/DataStore.cpp
++++ b/examples/companion_radio/DataStore.cpp
+@@ -1,6 +1,28 @@
++#ifdef REPEATER_COMPANION
++// Изолируем типы Companion от одноимённых типов репитера.
++#define NodePrefs RepeaterCompanionPrefs
++#define MyMesh RepeaterCompanionMesh
++#endif
++
+ #include <Arduino.h>
+ #include "DataStore.h"
+ 
++#ifdef REPEATER_COMPANION
++static constexpr char companion_id[] = "_ble";
++static constexpr char companion_prefs[] = "/ble-prefs.json";
++static constexpr char companion_contacts[] = "/ble-contacts";
++static constexpr char companion_channels[] = "/ble-channels";
++static constexpr char companion_adverts[] = "/ble-adverts";
++static constexpr char companion_blob_dir[] = "/ble-bl";
++#else
++static constexpr char companion_id[] = "_main";
++static constexpr char companion_prefs[] = "/prefs.json";
++static constexpr char companion_contacts[] = "/contacts3";
++static constexpr char companion_channels[] = "/channels2";
++static constexpr char companion_adverts[] = "/adv_blobs";
++static constexpr char companion_blob_dir[] = "/bl";
++#endif
++
+ #if defined(EXTRAFS) || defined(QSPIFLASH)
+   #define MAX_BLOBRECS 100
+ #else
+@@ -54,12 +76,12 @@ void DataStore::begin() {
+ #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
+   _ContactsChannelsTotalBlocks = _getContactsChannelsFS()->_getFS()->cfg->block_count;
+   checkAdvBlobFile();
+-  #if defined(EXTRAFS) || defined(QSPIFLASH)
++  #if (defined(EXTRAFS) || defined(QSPIFLASH)) && !defined(REPEATER_COMPANION)
+   migrateToSecondaryFS();
+   #endif
+ #else
+   // init 'blob store' support
+-  _fs->mkdir("/bl");
++  _fs->mkdir(companion_blob_dir);
+ #endif
+ }
+ 
+@@ -182,26 +204,29 @@ bool DataStore::formatFileSystem() {
+ }
+ 
+ bool DataStore::loadMainIdentity(mesh::LocalIdentity &identity) {
+-  return identity_store.load("_main", identity);
++  return identity_store.load(companion_id, identity);
+ }
+ 
+ bool DataStore::saveMainIdentity(const mesh::LocalIdentity &identity) {
+-  return identity_store.save("_main", identity);
++  return identity_store.save(companion_id, identity);
+ }
+ 
+ void DataStore::loadPrefs(NodePrefs& prefs) {
+-  if (_fs->exists("/prefs.json")) {
+-    File file = openRead(_fs, "/prefs.json");
++  if (_fs->exists(companion_prefs)) {
++    File file = openRead(_fs, companion_prefs);
+     if (file) {
+       prefs.loadSerial(file);   // new Serial prefs
+       file.close();
+     }
+-  } else if (_fs->exists("/new_prefs")) {
++  }
++#ifndef REPEATER_COMPANION
++  else if (_fs->exists("/new_prefs")) {
+     loadPrefsInt("/new_prefs", prefs);
+     if (savePrefs(prefs) ) {                // save to new format
+       //_fs->remove("/new_prefs"); // remove old
+     }
+   }
++#endif
+ }
+ 
+ void DataStore::loadPrefsInt(const char *filename, NodePrefs& _prefs) {
+@@ -247,7 +272,7 @@ void DataStore::loadPrefsInt(const char *filename, NodePrefs& _prefs) {
+ }
+ 
+ bool DataStore::savePrefs(NodePrefs& _prefs) {
+-  File file = openWrite(_fs, "/prefs.json");
++  File file = openWrite(_fs, companion_prefs);
+   if (file) {
+     bool success = _prefs.saveSerial(file);
+     file.close();
+@@ -257,7 +282,7 @@ bool DataStore::savePrefs(NodePrefs& _prefs) {
+ }
+ 
+ void DataStore::loadContacts(DataStoreHost* host) {
+-File file = openRead(_getContactsChannelsFS(), "/contacts3");
++File file = openRead(_getContactsChannelsFS(), companion_contacts);
+     if (file) {
+       bool full = false;
+       while (!full) {
+@@ -288,7 +313,7 @@ File file = openRead(_getContactsChannelsFS(), "/contacts3");
+ }
+ 
+ void DataStore::saveContacts(DataStoreHost* host, bool (*filter)(const ContactInfo& c)) {
+-  File file = openWrite(_getContactsChannelsFS(), "/contacts3");
++  File file = openWrite(_getContactsChannelsFS(), companion_contacts);
+   if (file) {
+     uint32_t idx = 0;
+     ContactInfo c;
+@@ -321,7 +346,7 @@ void DataStore::saveContacts(DataStoreHost* host, bool (*filter)(const ContactIn
+ }
+ 
+ void DataStore::loadChannels(DataStoreHost* host) {
+-    File file = openRead(_getContactsChannelsFS(), "/channels2");
++    File file = openRead(_getContactsChannelsFS(), companion_channels);
+     if (file) {
+       bool full = false;
+       uint8_t channel_idx = 0;
+@@ -346,7 +371,7 @@ void DataStore::loadChannels(DataStoreHost* host) {
+ }
+ 
+ void DataStore::saveChannels(DataStoreHost* host) {
+-  File file = openWrite(_getContactsChannelsFS(), "/channels2");
++  File file = openWrite(_getContactsChannelsFS(), companion_channels);
+   if (file) {
+     uint8_t channel_idx = 0;
+     ChannelDetails ch;
+@@ -377,8 +402,8 @@ struct BlobRec {
+ };
+ 
+ void DataStore::checkAdvBlobFile() {
+-  if (!_getContactsChannelsFS()->exists("/adv_blobs")) {
+-    File file = openWrite(_getContactsChannelsFS(), "/adv_blobs");
++  if (!_getContactsChannelsFS()->exists(companion_adverts)) {
++    File file = openWrite(_getContactsChannelsFS(), companion_adverts);
+     if (file) {
+       BlobRec zeroes;
+       memset(&zeroes, 0, sizeof(zeroes));
+@@ -392,10 +417,10 @@ void DataStore::checkAdvBlobFile() {
+ 
+ void DataStore::migrateToSecondaryFS() {
+   // migrate old adv_blobs, contacts3 and channels2 files to secondary FS if they don't already exist
+-  if (!_fsExtra->exists("/adv_blobs")) {
+-    if (_fs->exists("/adv_blobs")) {
+-    File oldAdvBlobs = openRead(_fs, "/adv_blobs");
+-    File newAdvBlobs = openWrite(_fsExtra, "/adv_blobs");
++  if (!_fsExtra->exists(companion_adverts)) {
++    if (_fs->exists(companion_adverts)) {
++    File oldAdvBlobs = openRead(_fs, companion_adverts);
++    File newAdvBlobs = openWrite(_fsExtra, companion_adverts);
+ 
+     if (oldAdvBlobs && newAdvBlobs) {
+       BlobRec rec;
+@@ -410,13 +435,13 @@ void DataStore::migrateToSecondaryFS() {
+     }
+     if (oldAdvBlobs) oldAdvBlobs.close();
+     if (newAdvBlobs) newAdvBlobs.close();
+-    _fs->remove("/adv_blobs");
++    _fs->remove(companion_adverts);
+     }
+   }
+-  if (!_fsExtra->exists("/contacts3")) {
+-    if (_fs->exists("/contacts3")) {
+-      File oldFile = openRead(_fs, "/contacts3");
+-      File newFile = openWrite(_fsExtra, "/contacts3");
++  if (!_fsExtra->exists(companion_contacts)) {
++    if (_fs->exists(companion_contacts)) {
++      File oldFile = openRead(_fs, companion_contacts);
++      File newFile = openWrite(_fsExtra, companion_contacts);
+ 
+       if (oldFile && newFile) {
+         uint8_t buf[64];
+@@ -427,13 +452,13 @@ void DataStore::migrateToSecondaryFS() {
+       }
+       if (oldFile) oldFile.close();
+       if (newFile) newFile.close();
+-      _fs->remove("/contacts3");
++      _fs->remove(companion_contacts);
+     }
+   }
+-  if (!_fsExtra->exists("/channels2")) {
+-    if (_fs->exists("/channels2")) {
+-      File oldFile = openRead(_fs, "/channels2");
+-      File newFile = openWrite(_fsExtra, "/channels2");
++  if (!_fsExtra->exists(companion_channels)) {
++    if (_fs->exists(companion_channels)) {
++      File oldFile = openRead(_fs, companion_channels);
++      File newFile = openWrite(_fsExtra, companion_channels);
+ 
+       if (oldFile && newFile) {
+         uint8_t buf[64];
+@@ -444,7 +469,7 @@ void DataStore::migrateToSecondaryFS() {
+       }
+       if (oldFile) oldFile.close();
+       if (newFile) newFile.close();
+-      _fs->remove("/channels2");
++      _fs->remove(companion_channels);
+     }
+   }
+   // cleanup nodes which have been testing the extra fs, copy _main.id and new_prefs back to primary
+@@ -481,14 +506,14 @@ void DataStore::migrateToSecondaryFS() {
+       _fsExtra->remove("/new_prefs");
+   }
+   // remove files from where they should not be anymore
+-  if (_fs->exists("/adv_blobs")) {
+-    _fs->remove("/adv_blobs");
++  if (_fs->exists(companion_adverts)) {
++    _fs->remove(companion_adverts);
+   }
+-  if (_fs->exists("/contacts3")) {
+-    _fs->remove("/contacts3");
++  if (_fs->exists(companion_contacts)) {
++    _fs->remove(companion_contacts);
+   }
+-  if (_fs->exists("/channels2")) {
+-    _fs->remove("/channels2");
++  if (_fs->exists(companion_channels)) {
++    _fs->remove(companion_channels);
+   }
+   if (_fsExtra->exists("/_main.id")) {
+     _fsExtra->remove("/_main.id");
+@@ -499,7 +524,7 @@ void DataStore::migrateToSecondaryFS() {
+ }
+ 
+ uint8_t DataStore::getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) {
+-  File file = openRead(_getContactsChannelsFS(), "/adv_blobs");
++  File file = openRead(_getContactsChannelsFS(), companion_adverts);
+   uint8_t len = 0;  // 0 = not found
+   if (file) {
+     BlobRec tmp;
+@@ -518,7 +543,7 @@ uint8_t DataStore::getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_b
+ bool DataStore::putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], uint8_t len) {
+   if (len < PUB_KEY_SIZE+4+SIGNATURE_SIZE || len > MAX_ADVERT_PKT_LEN) return false;
+   checkAdvBlobFile();
+-  File file = _getContactsChannelsFS()->open("/adv_blobs", FILE_O_WRITE);
++  File file = _getContactsChannelsFS()->open(companion_adverts, FILE_O_WRITE);
+   if (file) {
+     uint32_t pos = 0, found_pos = 0;
+     uint32_t min_timestamp = 0xFFFFFFFF;
+@@ -560,7 +585,7 @@ inline void makeBlobPath(const uint8_t key[], int key_len, char* path, size_t pa
+   char fname[18];
+   if (key_len > 8) key_len = 8; // just use first 8 bytes (prefix)
+   mesh::Utils::toHex(fname, key, key_len);
+-  sprintf(path, "/bl/%s", fname);
++  snprintf(path, path_size, "%s/%s", companion_blob_dir, fname);
+ }
+ 
+ uint8_t DataStore::getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) {
+diff --git a/examples/companion_radio/MyMesh.cpp b/examples/companion_radio/MyMesh.cpp
+index f32ea67..14b312a 100644
+--- a/examples/companion_radio/MyMesh.cpp
++++ b/examples/companion_radio/MyMesh.cpp
+@@ -1,3 +1,9 @@
++#ifdef REPEATER_COMPANION
++// Изолируем типы Companion от одноимённых типов репитера.
++#define NodePrefs RepeaterCompanionPrefs
++#define MyMesh RepeaterCompanionMesh
++#endif
++
+ #include "MyMesh.h"
+ 
+ #include <Arduino.h> // needed for PlatformIO
+@@ -485,7 +491,11 @@ bool MyMesh::filterRecvFloodPacket(mesh::Packet* packet) {
+ }
+ 
+ bool MyMesh::allowPacketForward(const mesh::Packet* packet) {
++#ifdef REPEATER_COMPANION
++  return false;
++#else
+   return _prefs.isRepeatEn();
++#endif
+ }
+ 
+ void MyMesh::sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt, uint32_t delay_millis) {
+@@ -897,9 +907,21 @@ uint32_t MyMesh::calcDirectTimeoutMillisFor(uint32_t pkt_airtime_millis, uint8_t
+ 
+ void MyMesh::onSendTimeout() {}
+ 
+-MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store)
++MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store
++#ifdef REPEATER_COMPANION
++               , mesh::Mesh& repeater, mesh::PacketManager& pool
++#endif
++)
++#ifdef REPEATER_COMPANION
++    : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, pool, tables),
++      _repeater(repeater),
++#else
+     : BaseChatMesh(radio, *new ArduinoMillis(), rng, rtc, *new StaticPoolPacketManager(16), tables),
++#endif
+       _serial(NULL), telemetry(MAX_PACKET_PAYLOAD - 4), _store(&store), _listener(NULL), _iter(0) {
++#ifdef REPEATER_COMPANION
++  _reservedPackets = 32;
++#endif
+   _iter_started = false;
+   _cli_rescue = false;
+   cli_command[0] = 0;
+@@ -942,6 +964,21 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
+ #endif
+ }
+ 
++#ifdef REPEATER_COMPANION
++bool MyMesh::beginForRepeater() {
++  if (!_store->loadMainIdentity(self_id)) {
++    bool saved = false;
++    for (int attempt = 0; attempt < 10 && !saved; ++attempt) {
++      self_id = radio_new_identity();
++      const auto hash = self_id.pub_key[0];
++      if (hash != 0 && hash != 0xff && hash != _repeater.self_id.pub_key[0]) {
++        saved = _store->saveMainIdentity(self_id);
++      }
++    }
++    if (!saved) return false;
++  }
++  if (self_id.pub_key[0] == _repeater.self_id.pub_key[0]) return false;
++#else
+ void MyMesh::begin() {
+   BaseChatMesh::begin();
+ 
+@@ -954,9 +991,13 @@ void MyMesh::begin() {
+     }
+     _store->saveMainIdentity(self_id);
+   }
++#endif
+ 
+ // if name is provided as a build flag, use that as default node name instead
+-#ifdef ADVERT_NAME
++#ifdef REPEATER_COMPANION
++  memcpy(_prefs.node_name, "Companion-", 10);
++  mesh::Utils::toHex(_prefs.node_name + 10, self_id.pub_key, 4);
++#elif defined(ADVERT_NAME)
+   strcpy(_prefs.node_name, ADVERT_NAME);
+ #else
+   // use hex of first 4 bytes of identity public key as default node name
+@@ -978,8 +1019,10 @@ void MyMesh::begin() {
+ 
+   // load persisted prefs
+   _store->loadPrefs(_prefs);
++#ifndef REPEATER_COMPANION
+   sensors.node_lat = _prefs.node_lat;
+   sensors.node_lon = _prefs.node_lon;
++#endif
+ 
+   // sanitise bad pref values
+   _prefs.rx_delay_base = constrain(_prefs.rx_delay_base, 0, 20.0f);
+@@ -1002,6 +1045,9 @@ void MyMesh::begin() {
+   addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure public channel
+   _store->loadChannels(this);
+ 
++#ifdef REPEATER_COMPANION
++  return true;
++#else
+   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+   radio_driver.setTxPower(_prefs.tx_power_dbm);
+   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+@@ -1010,6 +1056,7 @@ void MyMesh::begin() {
+ 
+   MESH_DEBUG_PRINTLN("RX Boosted Gain Mode: %s",
+                      radio_driver.getRxBoostedGainMode() ? "Enabled" : "Disabled");
++#endif
+ }
+ 
+ const char *MyMesh::getNodeName() {
+@@ -1053,6 +1100,24 @@ void MyMesh::startInterface(BaseSerialInterface &serial) {
+ }
+ 
+ void MyMesh::handleCmdFrame(size_t len) {
++#ifdef REPEATER_COMPANION
++  switch (cmd_frame[0]) {
++    case CMD_SET_RADIO_PARAMS:
++    case CMD_SET_RADIO_TX_POWER:
++    case CMD_SET_DEVICE_PIN:
++    case CMD_SET_CUSTOM_VAR:
++    case CMD_SET_TUNING_PARAMS:
++    case CMD_FACTORY_RESET:
++    case CMD_RUN_CLI_COMMAND:
++    case CMD_REBOOT:
++      writeDisabledFrame();
++      return;
++  }
++  if (cmd_frame[0] == CMD_SEND_CHANNEL_TXT_MSG && len < 8) {
++    writeErrFrame(ERR_CODE_ILLEGAL_ARG);
++    return;
++  }
++#endif
+   if (cmd_frame[0] == CMD_DEVICE_QUERY && len >= 2) { // sent when app establishes connection
+     app_target_ver = cmd_frame[1];                    // which version of protocol does app understand
+ 
+@@ -1061,7 +1126,11 @@ void MyMesh::handleCmdFrame(size_t len) {
+     out_frame[i++] = FIRMWARE_VER_CODE;
+     out_frame[i++] = MAX_CONTACTS / 2;   // v3+
+     out_frame[i++] = MAX_GROUP_CHANNELS; // v3+
++#ifdef REPEATER_COMPANION
++    memcpy(&out_frame[i], &_active_ble_pin, 4);
++#else
+     memcpy(&out_frame[i], &_prefs.ble_pin, 4);
++#endif
+     i += 4;
+     memset(&out_frame[i], 0, 12);
+     strcpy((char *)&out_frame[i], FIRMWARE_BUILD_DATE);
+@@ -1070,7 +1139,11 @@ void MyMesh::handleCmdFrame(size_t len) {
+     i += 40;
+     StrHelper::strzcpy((char *)&out_frame[i], FIRMWARE_VERSION, 20);
+     i += 20;
++#ifdef REPEATER_COMPANION
++    out_frame[i++] = 0;  // Ретрансляцией управляет репитер.
++#else
+     out_frame[i++] = _prefs.isRepeatEn() ? 1 : 0;   // v9+
++#endif
+     out_frame[i++] = _prefs.path_hash_mode;  // v10+
+     _serial->writeFrame(out_frame, i);
+   } else if (cmd_frame[0] == CMD_APP_START &&
+@@ -1090,8 +1163,8 @@ void MyMesh::handleCmdFrame(size_t len) {
+     i += PUB_KEY_SIZE;
+ 
+     int32_t lat, lon;
+-    lat = (sensors.node_lat * 1000000.0);
+-    lon = (sensors.node_lon * 1000000.0);
++    lat = (advertLatitude() * 1000000.0);
++    lon = (advertLongitude() * 1000000.0);
+     memcpy(&out_frame[i], &lat, 4);
+     i += 4;
+     memcpy(&out_frame[i], &lon, 4);
+@@ -1271,8 +1344,13 @@ void MyMesh::handleCmdFrame(size_t len) {
+       memcpy(&alt, &cmd_frame[9], 4); // for FUTURE support
+     }
+     if (lat <= 90 * 1E6 && lat >= -90 * 1E6 && lon <= 180 * 1E6 && lon >= -180 * 1E6) {
++#ifdef REPEATER_COMPANION
++      _prefs.node_lat = ((double)lat) / 1000000.0;
++      _prefs.node_lon = ((double)lon) / 1000000.0;
++#else
+       sensors.node_lat = ((double)lat) / 1000000.0;
+       sensors.node_lon = ((double)lon) / 1000000.0;
++#endif
+       savePrefs();
+       writeOKFrame();
+     } else {
+@@ -1299,7 +1377,7 @@ void MyMesh::handleCmdFrame(size_t len) {
+     if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
+       pkt = createSelfAdvert(_prefs.node_name);
+     } else {
+-      pkt = createSelfAdvert(_prefs.node_name, sensors.node_lat, sensors.node_lon);
++      pkt = createSelfAdvert(_prefs.node_name, advertLatitude(), advertLongitude());
+     }
+     if (pkt) {
+       if (len >= 2 && cmd_frame[1] == 1) { // optional param (1 = flood, 0 = zero hop)
+@@ -1383,7 +1461,7 @@ void MyMesh::handleCmdFrame(size_t len) {
+       if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
+         pkt = createSelfAdvert(_prefs.node_name);
+       } else {
+-        pkt = createSelfAdvert(_prefs.node_name, sensors.node_lat, sensors.node_lon);
++        pkt = createSelfAdvert(_prefs.node_name, advertLatitude(), advertLongitude());
+       }
+       if (pkt) {
+         pkt->header |= ROUTE_TYPE_FLOOD; // would normally be sent in this mode
+@@ -1541,6 +1619,13 @@ void MyMesh::handleCmdFrame(size_t len) {
+     } else {
+         mesh::LocalIdentity identity;
+         identity.readFrom(&cmd_frame[1], 64);
++#ifdef REPEATER_COMPANION
++        if (identity.pub_key[0] == 0 || identity.pub_key[0] == 0xff ||
++            identity.pub_key[0] == _repeater.self_id.pub_key[0]) {
++          writeErrFrame(ERR_CODE_ILLEGAL_ARG);
++          return;
++        }
++#endif
+         if (_store->saveMainIdentity(identity)) {
+           self_id = identity;
+           writeOKFrame();
+@@ -1913,6 +1998,11 @@ void MyMesh::handleCmdFrame(size_t len) {
+     }
+   } else if (cmd_frame[0] == CMD_GET_STATS && len >= 2) {
+     uint8_t stats_type = cmd_frame[1];
++#ifdef REPEATER_COMPANION
++    const mesh::Dispatcher& stats = _repeater;
++#else
++    const mesh::Dispatcher& stats = *this;
++#endif
+     if (stats_type == STATS_TYPE_CORE) {
+       int i = 0;
+       out_frame[i++] = RESP_CODE_STATS;
+@@ -1922,7 +2012,8 @@ void MyMesh::handleCmdFrame(size_t len) {
+       uint8_t queue_len = (uint8_t)_mgr->getOutboundTotal();
+       memcpy(&out_frame[i], &battery_mv, 2); i += 2;
+       memcpy(&out_frame[i], &uptime_secs, 4); i += 4;
+-      memcpy(&out_frame[i], &_err_flags, 2); i += 2;
++      uint16_t errors = stats.getErrorFlags();
++      memcpy(&out_frame[i], &errors, 2); i += 2;
+       out_frame[i++] = queue_len;
+       _serial->writeFrame(out_frame, i);
+     } else if (stats_type == STATS_TYPE_RADIO) {
+@@ -1932,8 +2023,8 @@ void MyMesh::handleCmdFrame(size_t len) {
+       int16_t noise_floor = (int16_t)_radio->getNoiseFloor();
+       int8_t last_rssi = (int8_t)radio_driver.getLastRSSI();
+       int8_t last_snr = (int8_t)(radio_driver.getLastSNR() * 4); // scaled by 4 for 0.25 dB precision
+-      uint32_t tx_air_secs = getTotalAirTime() / 1000;
+-      uint32_t rx_air_secs = getReceiveAirTime() / 1000;
++      uint32_t tx_air_secs = stats.getTotalAirTime() / 1000;
++      uint32_t rx_air_secs = stats.getReceiveAirTime() / 1000;
+       memcpy(&out_frame[i], &noise_floor, 2); i += 2;
+       out_frame[i++] = last_rssi;
+       out_frame[i++] = last_snr;
+@@ -1946,10 +2037,10 @@ void MyMesh::handleCmdFrame(size_t len) {
+       out_frame[i++] = STATS_TYPE_PACKETS;
+       uint32_t recv = radio_driver.getPacketsRecv();
+       uint32_t sent = radio_driver.getPacketsSent();
+-      uint32_t n_sent_flood = getNumSentFlood();
+-      uint32_t n_sent_direct = getNumSentDirect();
+-      uint32_t n_recv_flood = getNumRecvFlood();
+-      uint32_t n_recv_direct = getNumRecvDirect();
++      uint32_t n_sent_flood = stats.getNumSentFlood();
++      uint32_t n_sent_direct = stats.getNumSentDirect();
++      uint32_t n_recv_flood = stats.getNumRecvFlood();
++      uint32_t n_recv_direct = stats.getNumRecvDirect();
+       uint32_t n_recv_errors = radio_driver.getPacketsRecvErrors();
+       memcpy(&out_frame[i], &recv, 4); i += 4;
+       memcpy(&out_frame[i], &sent, 4); i += 4;
+@@ -2077,6 +2168,10 @@ void MyMesh::enterCLIRescue() {
+ }
+ 
+ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char* reply) {
++#ifdef REPEATER_COMPANION
++  // Настройки общей платы и операции с флешем доступны через консоль репитера.
++  return false;
++#endif
+   while (*command == ' ') command++; // skip leading spaces
+ 
+   if (strlen(command) > 4 && command[2] == '|') { // optional prefix (for companion radio CLI)
+@@ -2387,6 +2482,13 @@ void MyMesh::checkCLIRescueCmd() {
+ 
+ void MyMesh::checkSerialInterface() {
+   size_t len = _serial->checkRecvFrame(cmd_frame);
++#ifdef REPEATER_COMPANION
++  if (!_serial->isConnected()) {
++    _iter_started = false;
++    app_target_ver = 0;
++    return;
++  }
++#endif
+   if (len > 0) {
+     handleCmdFrame(len);
+   } else if (_iter_started              // check if our ContactsIterator is 'running'
+@@ -2413,7 +2515,11 @@ void MyMesh::checkSerialInterface() {
+ }
+ 
+ void MyMesh::loop() {
++#ifdef REPEATER_COMPANION
++  pollChat();
++#else
+   BaseChatMesh::loop();
++#endif
+ 
+   if (_cli_rescue) {
+     checkCLIRescueCmd();
+@@ -2438,7 +2544,7 @@ bool MyMesh::advert() {
+   if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
+     pkt = createSelfAdvert(_prefs.node_name);
+   } else {
+-    pkt = createSelfAdvert(_prefs.node_name, sensors.node_lat, sensors.node_lon);
++    pkt = createSelfAdvert(_prefs.node_name, advertLatitude(), advertLongitude());
+   }
+   if (pkt) {
+     sendZeroHop(pkt);
+@@ -2452,3 +2558,64 @@ bool MyMesh::advert() {
+ bool MyMesh::hasPendingWork() const {
+   return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0;
+ }
++
++#ifdef REPEATER_COMPANION
++#include "../simple_repeater/RepeaterCompanion.h"
++#include "../simple_repeater/RepeaterCompanionPath.h"
++#if defined(NRF52_PLATFORM)
++#include <CustomLFS.h>
++#endif
++
++void MyMesh::onQueuedPacket(const mesh::Packet* packet) {
++  // Пакеты Companion уже исходят с этой платы. Репитер не пересылает их ещё раз.
++  if (packet->isRouteFlood()) _repeater.rememberPacket(packet);
++}
++
++void MyMesh::receiveForRepeater(const mesh::Packet& packet) {
++  auto copy = companionPacketView(packet, _repeater.self_id);
++  mesh::Mesh::onRecvPacket(&copy);
++}
++
++namespace repeater_companion {
++static MyMesh* companion;
++static BaseSerialInterface* serial;
++
++bool begin(mesh::Mesh& repeater, mesh::Radio& radio, mesh::PacketManager& pool,
++           BaseSerialInterface& ble, uint32_t pin) {
++  auto& rtc = *repeater.getRTCClock();
++#if defined(NRF52_PLATFORM)
++  // Штатная область ExtraFS для приложений Companion. Настройки и ключ
++  // репитера остаются в InternalFS и не переносятся.
++  static CustomLFS companion_fs(0xD4000, 0x19000, 128);
++  if (!companion_fs.begin()) return false;
++  static DataStore store(InternalFS, companion_fs, rtc);
++#else
++  static DataStore store(SPIFFS, rtc);
++#endif
++  store.begin();
++  static SimpleMeshTables tables;
++  static MyMesh instance(radio, *repeater.getRNG(), rtc, tables, store, repeater, pool);
++  if (!instance.beginForRepeater()) return false;
++  companion = &instance;
++  serial = &ble;
++  companion->setBLEPin(pin);
++  companion->startInterface(ble);
++  return true;
++}
++
++void receive(const mesh::Packet& packet) {
++  if (companion && serial->isEnabled()) companion->receiveForRepeater(packet);
++}
++
++void loop(float frequency, float bandwidth, uint8_t sf, uint8_t cr, int8_t power) {
++  if (!companion) return;
++  auto& prefs = *companion->getNodePrefs();
++  prefs.freq = frequency;
++  prefs.bw = bandwidth;
++  prefs.sf = sf;
++  prefs.cr = cr;
++  prefs.tx_power_dbm = power;
++  companion->loop();
++}
++}
++#endif
+diff --git a/examples/companion_radio/MyMesh.h b/examples/companion_radio/MyMesh.h
+index 944790d..5638b87 100644
+--- a/examples/companion_radio/MyMesh.h
++++ b/examples/companion_radio/MyMesh.h
+@@ -108,7 +108,17 @@ public:
+       virtual ~Listener() { }
+   };
+ 
+-  MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store);
++  MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store
++#ifdef REPEATER_COMPANION
++         , mesh::Mesh& repeater, mesh::PacketManager& pool
++#endif
++  );
++
++#ifdef REPEATER_COMPANION
++  bool beginForRepeater();
++  void receiveForRepeater(const mesh::Packet& packet);
++  void onQueuedPacket(const mesh::Packet* packet) override;
++#endif
+ 
+   void begin();
+   void startInterface(BaseSerialInterface &serial);
+@@ -195,8 +205,10 @@ protected:
+ 
+ public:
+   void savePrefs() {
++#ifndef REPEATER_COMPANION
+     _prefs.node_lat = sensors.node_lat;
+     _prefs.node_lon = sensors.node_lon;
++#endif
+     _store->savePrefs(_prefs);
+     _prefs.clearDirty();
+   }
+@@ -216,6 +228,21 @@ public:
+   bool hasPendingWork() const;
+ 
+ private:
++  double advertLatitude() const {
++#ifdef REPEATER_COMPANION
++    return _prefs.node_lat;
++#else
++    return sensors.node_lat;
++#endif
++  }
++  double advertLongitude() const {
++#ifdef REPEATER_COMPANION
++    return _prefs.node_lon;
++#else
++    return sensors.node_lon;
++#endif
++  }
++
+   void writeOKFrame();
+   void writeErrFrame(uint8_t err_code);
+   void writeDisabledFrame();
+@@ -240,6 +267,9 @@ private:
+   void saveContacts();
+ 
+   DataStore* _store;
++#ifdef REPEATER_COMPANION
++  mesh::Mesh& _repeater;
++#endif
+   NodePrefs _prefs;
+   uint32_t pending_login;
+   uint32_t pending_status;
+diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
+index c44e3f1..aec9bc8 100644
+--- a/examples/simple_repeater/MyMesh.cpp
++++ b/examples/simple_repeater/MyMesh.cpp
+@@ -1,4 +1,7 @@
+ #include "MyMesh.h"
++#ifdef REPEATER_COMPANION
++#include "RepeaterCompanion.h"
++#endif
+ #include <algorithm>
+ 
+ /* ------------------------------ Config -------------------------------- */
+@@ -477,6 +480,9 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+ }
+ 
+ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
++#ifdef REPEATER_COMPANION
++  repeater_companion::receive(*pkt);
++#endif
+ #ifdef WITH_BRIDGE
+   if (_prefs.bridge_pkt_src == 1) {
+     bridge.sendPacket(pkt);
+@@ -865,7 +871,11 @@ void MyMesh::sendNodeDiscoverReq() {
+ 
+ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondClock &ms, mesh::RNG &rng,
+                mesh::RTCClock &rtc, mesh::MeshTables &tables)
++#ifdef REPEATER_COMPANION
++    : mesh::Mesh(radio, ms, rng, rtc, *new StaticPoolPacketManager(48), tables),
++#else
+     : mesh::Mesh(radio, ms, rng, rtc, *new StaticPoolPacketManager(32), tables),
++#endif
+       region_map(key_store), temp_map(key_store),
+       _cli(board, rtc, sensors, region_map, acl, &_prefs, this),
+       telemetry(MAX_PACKET_PAYLOAD - 4),
+diff --git a/examples/simple_repeater/MyMesh.h b/examples/simple_repeater/MyMesh.h
+index 8b31175..c248aa4 100644
+--- a/examples/simple_repeater/MyMesh.h
++++ b/examples/simple_repeater/MyMesh.h
+@@ -242,6 +242,9 @@ public:
+ 
+   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
+ #ifdef REPEATER_LOCAL_INTERFACES
++#ifdef REPEATER_COMPANION
++  mesh::PacketManager& companionPacketPool() { return *_mgr; }
++#endif
+   bool handleChannelBotCommand(const char* command, char* reply, size_t capacity);
+   void handleMonitorCommand(char* command, char* reply, size_t capacity);
+ #endif
+diff --git a/examples/simple_repeater/RepeaterCompanion.h b/examples/simple_repeater/RepeaterCompanion.h
+new file mode 100644
+index 0000000..2dc6ef7
+--- /dev/null
++++ b/examples/simple_repeater/RepeaterCompanion.h
+@@ -0,0 +1,11 @@
++#pragma once
++
++#include <Mesh.h>
++#include <helpers/BaseSerialInterface.h>
++
++namespace repeater_companion {
++bool begin(mesh::Mesh& repeater, mesh::Radio& radio, mesh::PacketManager& pool,
++           BaseSerialInterface& ble, uint32_t pin);
++void receive(const mesh::Packet& packet);
++void loop(float frequency, float bandwidth, uint8_t sf, uint8_t cr, int8_t power);
++}
+diff --git a/examples/simple_repeater/RepeaterCompanionPath.h b/examples/simple_repeater/RepeaterCompanionPath.h
+new file mode 100644
+index 0000000..516210e
+--- /dev/null
++++ b/examples/simple_repeater/RepeaterCompanionPath.h
+@@ -0,0 +1,14 @@
++#pragma once
++
++#include <Identity.h>
++#include <Packet.h>
++
++// Локальный Companion получает копию. Путь оригинала остаётся у репитера.
++inline mesh::Packet companionPacketView(const mesh::Packet& packet, const mesh::Identity& repeater) {
++  mesh::Packet copy = packet;
++  if (copy.isRouteDirect() && copy.getPathHashCount() == 1 &&
++      repeater.isHashMatch(copy.path, copy.getPathHashSize())) {
++    copy.setPathHashCount(0);
++  }
++  return copy;
++}
+diff --git a/examples/simple_repeater/RepeaterLocalInterfaces.inc b/examples/simple_repeater/RepeaterLocalInterfaces.inc
+index cdf03ec..33715d9 100644
+--- a/examples/simple_repeater/RepeaterLocalInterfaces.inc
++++ b/examples/simple_repeater/RepeaterLocalInterfaces.inc
+@@ -8,6 +8,9 @@
+ #endif
+ 
+ #include "RepeaterConsoleLine.h"
++#ifdef REPEATER_COMPANION
++#include "RepeaterCompanion.h"
++#endif
+ 
+ static constexpr size_t reply_capacity = 512;
+ static constexpr uint32_t ble_off = UINT32_MAX;
+@@ -19,9 +22,11 @@ static constexpr uint32_t default_ble_pin = ble_off;
+ #endif
+ static SerialBLEInterface ble;
+ static uint32_t active_ble_pin = default_ble_pin;
++#ifndef REPEATER_COMPANION
+ static RepeaterConsoleLine ble_line;
+ static char ble_reply[reply_capacity + 8];
+ static size_t ble_reply_offset, ble_reply_length;
++#endif
+ 
+ static size_t make_monitor_reply(char* command, char* output, size_t capacity) {
+   char reply[reply_capacity] = {};
+@@ -217,6 +222,10 @@ static bool save_ble_pin(uint32_t pin) {
+ #endif
+ 
+ static void ble_loop() {
++#ifdef REPEATER_COMPANION
++  const auto& prefs = *the_mesh.getNodePrefs();
++  repeater_companion::loop(prefs.freq, prefs.bw, prefs.sf, prefs.cr, prefs.tx_power_dbm);
++#else
+   if (!ble.isEnabled()) return;
+   uint8_t input[MAX_FRAME_SIZE];
+   const size_t length = ble.checkRecvFrame(input);
+@@ -236,23 +245,37 @@ static void ble_loop() {
+     const size_t length = min((size_t)20, ble_reply_length - ble_reply_offset);
+     ble_reply_offset += ble.writeFrame((const uint8_t*)ble_reply + ble_reply_offset, length);
+   }
++#endif
+ }
+ 
+ static void local_interfaces_begin() {
+   load_local_settings();
+   if (active_ble_pin > 999999) return;
++#ifdef REPEATER_COMPANION
++  char name[24];
++  mesh::Utils::toHex(name, the_mesh.self_id.pub_key, 4);
++  constexpr const char* prefix = "MeshCore-";
++#else
+   char name[32];
+   snprintf(name, sizeof(name), "%s", the_mesh.getNodeName());
++  constexpr const char* prefix = "Repeater-";
++#endif
+ #if defined(NRF52_PLATFORM)
+-  ble.begin("Repeater-", name, active_ble_pin, /*enable_dfu=*/false);
++  ble.begin(prefix, name, active_ble_pin, /*enable_dfu=*/false);
+   if (ble_settings.bonds_pin != active_ble_pin) {
+     Bluefruit.Periph.clearBonds();
+     if (!save_ble_settings({active_ble_pin, active_ble_pin})) return;
+   }
+ #else
+-  ble.begin("Repeater-", name, active_ble_pin, /*bond=*/false);
++  ble.begin(prefix, name, active_ble_pin, /*bond=*/false);
+ #endif
++#ifdef REPEATER_COMPANION
++  if (!repeater_companion::begin(the_mesh, radio_driver, the_mesh.companionPacketPool(), ble, active_ble_pin)) {
++    Serial.println("BLE Companion storage or identity unavailable");
++  }
++#else
+   ble.enable();
++#endif
+ }
+ 
+ static bool local_interfaces_active() {
+diff --git a/src/Dispatcher.cpp b/src/Dispatcher.cpp
+index c0610b7..d679dbf 100644
+--- a/src/Dispatcher.cpp
++++ b/src/Dispatcher.cpp
+@@ -354,6 +354,9 @@ void Dispatcher::checkSend() {
+ }
+ 
+ Packet* Dispatcher::obtainNewPacket() {
++#ifdef REPEATER_COMPANION
++  if (_reservedPackets && _mgr->getFreeCount() <= _reservedPackets) return nullptr;
++#endif
+   auto pkt = _mgr->allocNew();  // TODO: zero out all fields
+   if (pkt == NULL) {
+     _err_flags |= ERR_EVENT_FULL;
+@@ -373,6 +376,9 @@ void Dispatcher::sendPacket(Packet* packet, uint8_t priority, uint32_t delay_mil
+     MESH_DEBUG_PRINTLN("%s Dispatcher::sendPacket(): ERROR: invalid packet... path_len=%d, payload_len=%d", getLogDateTime(), (uint32_t) packet->path_len, (uint32_t) packet->payload_len);
+     _mgr->free(packet);
+   } else {
++#ifdef REPEATER_COMPANION
++    onQueuedPacket(packet);
++#endif
+     _mgr->queueOutbound(packet, priority, futureMillis(delay_millis));
+   }
+ }
+diff --git a/src/Dispatcher.h b/src/Dispatcher.h
+index aad6cba..e6c6367 100644
+--- a/src/Dispatcher.h
++++ b/src/Dispatcher.h
+@@ -137,6 +137,10 @@ protected:
+   Radio* _radio;
+   MillisecondClock* _ms;
+   uint16_t _err_flags;
++#ifdef REPEATER_COMPANION
++  uint8_t _reservedPackets = 0;
++  virtual void onQueuedPacket(const Packet*) {}
++#endif
+ 
+   Dispatcher(Radio& radio, MillisecondClock& ms, PacketManager& mgr)
+     : _radio(&radio), _ms(&ms), _mgr(&mgr)
+@@ -180,6 +184,7 @@ public:
+   void releasePacket(Packet* packet);
+   void sendPacket(Packet* packet, uint8_t priority, uint32_t delay_millis=0);
+ 
++  uint16_t getErrorFlags() const { return _err_flags; }
+   unsigned long getTotalAirTime() const { return total_air_time; }
+   unsigned long getReceiveAirTime() const {return rx_air_time; }
+   unsigned long getRemainingTxBudget() const { return tx_budget_ms; }
+diff --git a/src/Mesh.h b/src/Mesh.h
+index 22bb5c6..c563332 100644
+--- a/src/Mesh.h
++++ b/src/Mesh.h
+@@ -179,6 +179,10 @@ public:
+ 
+   LocalIdentity self_id;
+ 
++#ifdef REPEATER_COMPANION
++  void rememberPacket(const Packet* packet) { _tables->markSeen(packet); }
++#endif
++
+   RNG* getRNG() const { return _rng; }
+   RTCClock* getRTCClock() const { return _rtc; }
+ 
+diff --git a/src/helpers/BaseChatMesh.cpp b/src/helpers/BaseChatMesh.cpp
+index 2859241..43d9690 100644
+--- a/src/helpers/BaseChatMesh.cpp
++++ b/src/helpers/BaseChatMesh.cpp
+@@ -985,7 +985,10 @@ bool ContactsIterator::hasNext(const BaseChatMesh* mesh, ContactInfo& dest) {
+ 
+ void BaseChatMesh::loop() {
+   Mesh::loop();
++  pollChat();
++}
+ 
++void BaseChatMesh::pollChat() {
+   if (txt_send_timeout && millisHasNowPassed(txt_send_timeout)) {
+     // failed to get an ACK
+     onSendTimeout();
+diff --git a/src/helpers/BaseChatMesh.h b/src/helpers/BaseChatMesh.h
+index 835384b..519d479 100644
+--- a/src/helpers/BaseChatMesh.h
++++ b/src/helpers/BaseChatMesh.h
+@@ -78,6 +78,8 @@ class BaseChatMesh : public mesh::Mesh {
+   void sendAckTo(const ContactInfo& dest, const uint8_t* ack_hash, uint8_t ack_len=4);
+ 
+ protected:
++  void pollChat();
++
+   BaseChatMesh(mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::PacketManager& mgr, mesh::MeshTables& tables)
+       : mesh::Mesh(radio, ms, rng, rtc, mgr, tables)
+   {
+diff --git a/src/helpers/esp32/SerialBLEInterface.cpp b/src/helpers/esp32/SerialBLEInterface.cpp
+index 0b08710..8b8bcfe 100644
+--- a/src/helpers/esp32/SerialBLEInterface.cpp
++++ b/src/helpers/esp32/SerialBLEInterface.cpp
+@@ -26,7 +26,11 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
+   // Create the BLE Device
+   BLEDevice::init(dev_name);
+   BLEDevice::setSecurityCallbacks(this);
++#ifdef REPEATER_COMPANION
++  BLEDevice::setMTU(MAX_FRAME_SIZE + 3);  // Заголовок ATT Write/Notify занимает три байта.
++#else
+   BLEDevice::setMTU(MAX_FRAME_SIZE);
++#endif
+ 
+   BLESecurity  sec;
+   sec.setStaticPIN(pin_code);
+diff --git a/tests/repeater/companion_scheduler.cpp b/tests/repeater/companion_scheduler.cpp
+new file mode 100644
+index 0000000..d19fe9b
+--- /dev/null
++++ b/tests/repeater/companion_scheduler.cpp
+@@ -0,0 +1,122 @@
++#include <cassert>
++
++#include "RepeaterCompanionPath.h"
++#include <Dispatcher.h>
++#include <helpers/StaticPoolPacketManager.h>
++
++// Тест использует только открытый идентификатор и не вызывает криптографию.
++mesh::Identity::Identity() : pub_key{} {}
++
++class TestClock : public mesh::MillisecondClock {
++public:
++  unsigned long now = 1000;
++  unsigned long getMillis() override { return now; }
++};
++
++class TestRadio : public mesh::Radio {
++public:
++  int starts = 0;
++  uint8_t last_type = 0;
++  uint8_t last_hops = 0;
++  uint8_t pending[4] = {};
++  bool has_pending = false;
++  bool receiving = true;
++
++  int recvRaw(uint8_t* data, int size) override {
++    if (!has_pending) return 0;
++    assert(size >= 4);
++    memcpy(data, pending, 4);
++    has_pending = false;
++    return 4;
++  }
++  uint32_t getEstAirtimeFor(int) override { return 1; }
++  float packetScore(float, int) override { return 1; }
++  bool startSendRaw(const uint8_t* data, int size) override {
++    assert(receiving && size >= 2);
++    ++starts;
++    receiving = false;
++    last_type = (data[0] >> PH_TYPE_SHIFT) & PH_TYPE_MASK;
++    last_hops = data[1] & 63;
++    return true;
++  }
++  bool isSendComplete() override { return !receiving; }
++  void onSendFinished() override { receiving = true; }
++  bool isInRecvMode() const override { return receiving; }
++};
++
++class TestDispatcher : public mesh::Dispatcher {
++public:
++  TestDispatcher(mesh::Radio& radio, mesh::MillisecondClock& clock,
++                 mesh::PacketManager& pool, uint8_t reserve)
++    : mesh::Dispatcher(radio, clock, pool) {
++    _reservedPackets = reserve;
++  }
++
++  mesh::DispatcherAction onRecvPacket(mesh::Packet* packet) override {
++    assert(packet->isRouteDirect());
++    assert(packet->getPathHashCount() == 1);
++    packet->setPathHashCount(0);
++    return ACTION_RETRANSMIT(0);
++  }
++};
++
++static void checkCompanionView() {
++  mesh::Identity repeater;
++  repeater.pub_key[0] = 0x17;
++  repeater.pub_key[1] = 0x35;
++  mesh::Packet original;
++  original.header = (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT;
++  original.setPathHashSizeAndCount(2, 1);
++  memcpy(original.path, repeater.pub_key, 2);
++  auto copy = companionPacketView(original, repeater);
++  assert(copy.getPathHashCount() == 0 && copy.getPathHashSize() == 2);
++  assert(original.getPathHashCount() == 1 && original.getPathHashSize() == 2);
++  original.path[1] ^= 1;
++  assert(companionPacketView(original, repeater).getPathHashCount() == 1);
++  original.path[1] ^= 1;
++  original.setPathHashSizeAndCount(2, 2);
++  assert(companionPacketView(original, repeater).getPathHashCount() == 2);
++  original.setPathHashSizeAndCount(2, 1);
++  original.header = (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD;
++  assert(companionPacketView(original, repeater).getPathHashCount() == 1);
++}
++
++int main() {
++  checkCompanionView();
++  TestClock clock;
++  TestRadio radio;
++  // Выделение с теми же лимитами, что у гибридного профиля.
++  static StaticPoolPacketManager pool(48);
++  TestDispatcher repeater(radio, clock, pool, 0);
++  TestDispatcher companion(radio, clock, pool, 32);
++  repeater.begin();
++
++  for (int i = 0; i < 16; ++i) {
++    auto* packet = companion.obtainNewPacket();
++    assert(packet);
++    packet->header = (PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD;
++    packet->payload[0] = 0x33;
++    packet->payload_len = 1;
++    companion.sendPacket(packet, 1);
++  }
++  assert(!companion.obtainNewPacket() && pool.getFreeCount() == 32);
++
++  radio.pending[0] = (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT;
++  radio.pending[1] = 1;
++  radio.pending[2] = 0x17;
++  radio.pending[3] = 0xa0;
++  radio.has_pending = true;
++  // Обслуживается только физический диспетчер, как при отключённом телефоне.
++  ++clock.now;
++  repeater.loop();
++  assert(radio.starts == 1 && radio.last_type == PAYLOAD_TYPE_TXT_MSG && radio.last_hops == 0);
++  for (int tick = 0; tick < 40; ++tick) {
++    ++clock.now;
++    repeater.loop();
++    if (radio.starts >= 2) assert(radio.last_type == PAYLOAD_TYPE_GRP_TXT);
++  }
++  assert(radio.starts == 17);
++  ++clock.now;
++  repeater.loop();
++  assert(pool.getFreeCount() == 48 && pool.getOutboundTotal() == 0);
++}
+diff --git a/variants/heltec_v4/platformio.ini b/variants/heltec_v4/platformio.ini
+index dddae75..05bb18e 100644
+--- a/variants/heltec_v4/platformio.ini
++++ b/variants/heltec_v4/platformio.ini
+@@ -114,6 +114,21 @@ lib_deps =
+   Preferences
+   WiFi
+ 
++[env:heltec_v4_repeater_companion]
++extends = env:heltec_v4_repeater_connect
++build_flags =
++  ${env:heltec_v4_repeater_connect.build_flags}
++  -D REPEATER_COMPANION
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D OFFLINE_QUEUE_SIZE=64
++build_src_filter = ${env:heltec_v4_repeater_connect.build_src_filter}
++  +<../examples/companion_radio/MyMesh.cpp>
++  +<../examples/companion_radio/DataStore.cpp>
++lib_deps =
++  ${env:heltec_v4_repeater_connect.lib_deps}
++  densaugeo/base64 @ 1.4.0
++
+ [env:heltec_v4_expansionkit_repeater]
+ extends = heltec_v4_oled
+ build_flags =
+diff --git a/variants/promicro/platformio.ini b/variants/promicro/platformio.ini
+index eadd642..705c787 100644
+--- a/variants/promicro/platformio.ini
++++ b/variants/promicro/platformio.ini
+@@ -64,6 +64,23 @@ build_flags =
+ build_src_filter = ${env:ProMicro_repeater.build_src_filter}
+   +<helpers/nrf52/SerialBLEInterface.cpp>
+ 
++[env:ProMicro_repeater_companion]
++extends = env:ProMicro_repeater_connect
++build_flags =
++  ${env:ProMicro_repeater_connect.build_flags}
++  -D REPEATER_COMPANION
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D OFFLINE_QUEUE_SIZE=64
++build_src_filter = ${env:ProMicro_repeater_connect.build_src_filter}
++  +<../examples/companion_radio/MyMesh.cpp>
++  +<../examples/companion_radio/DataStore.cpp>
++lib_deps =
++  ${env:ProMicro_repeater_connect.lib_deps}
++  densaugeo/base64 @ 1.4.0
++board_build.ldscript = boards/nrf52840_s140_v6_extrafs.ld
++board_upload.maximum_size = 712704
++
+ [env:ProMicro_repeater_bridge_rs232_serial1]
+ extends = Promicro
+ build_src_filter = ${Promicro.build_src_filter}

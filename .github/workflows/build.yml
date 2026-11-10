@@ -13,7 +13,11 @@ permissions:
 
 jobs:
   firmware:
-    name: Heltec V4 OLED и FakeTec V4
+    name: Heltec V4 OLED и FakeTec V4 (${{ matrix.profile }})
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [repeater, companion]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -24,9 +28,9 @@ jobs:
       - name: Установка PlatformIO
         run: python -m pip install platformio==6.2.0
       - name: Проверка консоли и сборка
-        run: ./scripts/build.sh
+        run: ./scripts/build.sh "${{ matrix.profile }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: meshcore-firmware
-          path: dist/
+          name: meshcore-${{ matrix.profile }}
+          path: dist/${{ matrix.profile }}/
           if-no-files-found: error
