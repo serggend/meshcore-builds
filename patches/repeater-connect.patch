@@ -1,0 +1,994 @@
+diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
+index 61b6c14..c44e3f1 100644
+--- a/examples/simple_repeater/MyMesh.cpp
++++ b/examples/simple_repeater/MyMesh.cpp
+@@ -651,6 +651,10 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
+                           const uint8_t *app_data, size_t app_data_len) {
+   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
+ 
++#ifdef REPEATER_LOCAL_INTERFACES
++  recordAdvert(packet, id, timestamp, app_data, app_data_len);
++#endif
++
+   // if this a zero hop advert (and not via 'Share'), add it to neighbours
+   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
+     AdvertDataParser parser(app_data, app_data_len);
+@@ -947,6 +951,10 @@ void MyMesh::begin(FILESYSTEM *fs) {
+   _fs = fs;
+   // load persisted prefs
+   _cli.loadPrefs(_fs);
++#ifdef REPEATER_LOCAL_INTERFACES
++  // Отключаем общеизвестный пароль и на чистой установке, и при обновлении.
++  if (strcmp(_prefs.password, ADMIN_PASSWORD) == 0) _prefs.password[0] = 0;
++#endif
+   acl.load(_fs, self_id);
+   // TODO: key_store.begin();
+   region_map.load(_fs);
+@@ -1286,6 +1294,19 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
+   }
+ }
+ 
++#ifdef REPEATER_LOCAL_INTERFACES
++#include "RepeaterPublic.inc"
++#include "RepeaterConsolePolicy.h"
++
++void MyMesh::handleMonitorCommand(char* command, char* reply, size_t capacity) {
++  if (!monitor_command_allowed(command)) {
++    snprintf(reply, capacity, "ERR command not allowed");
++  } else if (!handleChannelBotCommand(command, reply, capacity)) {
++    _cli.handleCommand(0, command, reply);
++  }
++}
++#endif
++
+ void MyMesh::loop() {
+ #ifdef WITH_BRIDGE
+   bridge.loop();
+diff --git a/examples/simple_repeater/MyMesh.h b/examples/simple_repeater/MyMesh.h
+index dc89325..8b31175 100644
+--- a/examples/simple_repeater/MyMesh.h
++++ b/examples/simple_repeater/MyMesh.h
+@@ -78,7 +78,17 @@ struct NeighbourInfo {
+ 
+ #define PACKET_LOG_FILE  "/packet_log"
+ 
++#ifdef REPEATER_LOCAL_INTERFACES
++#include "RepeaterPublic.h"
++#endif
++
+ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
++#ifdef REPEATER_LOCAL_INTERFACES
++  RepeaterPublicState _channel_bot;
++  RepeaterAdvertState _advert;
++  void initChannelBot();
++  void recordAdvert(mesh::Packet*, const mesh::Identity&, uint32_t, const uint8_t*, size_t);
++#endif
+   FILESYSTEM* _fs;
+   uint32_t last_millis;
+   uint64_t uptime_millis;
+@@ -128,6 +138,10 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
+   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
+ 
+ protected:
++#ifdef REPEATER_LOCAL_INTERFACES
++  int searchChannelsByHash(const uint8_t*, mesh::GroupChannel[], int) override;
++  void onGroupDataRecv(mesh::Packet*, uint8_t, const mesh::GroupChannel&, uint8_t*, size_t) override;
++#endif
+   float getAirtimeBudgetFactor() const override {
+     return _prefs.airtime_factor;
+   }
+@@ -227,6 +241,10 @@ public:
+   void clearStats() override;
+ 
+   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
++#ifdef REPEATER_LOCAL_INTERFACES
++  bool handleChannelBotCommand(const char* command, char* reply, size_t capacity);
++  void handleMonitorCommand(char* command, char* reply, size_t capacity);
++#endif
+   void loop();
+ 
+ #if defined(WITH_BRIDGE)
+diff --git a/examples/simple_repeater/RepeaterConsoleLine.h b/examples/simple_repeater/RepeaterConsoleLine.h
+new file mode 100644
+index 0000000..696cf35
+--- /dev/null
++++ b/examples/simple_repeater/RepeaterConsoleLine.h
+@@ -0,0 +1,34 @@
++#pragma once
++
++#include <stddef.h>
++
++class RepeaterConsoleLine {
++  size_t length = 0;
++  bool invalid = false;
++  bool after_cr = false;
++
++public:
++  char text[384] = {};
++
++  // Пропускаем LF после CR и отбрасываем переполненную строку целиком.
++  bool push(unsigned char byte) {
++    const bool skip_lf = after_cr && byte == '\n';
++    after_cr = byte == '\r';
++    if (skip_lf) return false;
++    if (byte == '\r' || byte == '\n') {
++      text[length] = 0;
++      length = 0;
++      const bool ready = !invalid;
++      invalid = false;
++      return ready;
++    }
++    if (byte == 8 || byte == 127) {
++      if (length && !invalid) --length;
++    } else if (byte < 32 || length == sizeof(text) - 1) {
++      invalid = true;
++    } else if (!invalid) {
++      text[length++] = byte;
++    }
++    return false;
++  }
++};
+diff --git a/examples/simple_repeater/RepeaterConsolePolicy.h b/examples/simple_repeater/RepeaterConsolePolicy.h
+new file mode 100644
+index 0000000..cf8552f
+--- /dev/null
++++ b/examples/simple_repeater/RepeaterConsolePolicy.h
+@@ -0,0 +1,63 @@
++#pragma once
++#include <stdint.h>
++#include <string.h>
++
++// TCP-монитор уже USB-консоли по возможностям. Проверяем аргументы здесь,
++// чтобы неверные или изменяющие настройки команды не доходили до MyMesh.
++static bool monitor_decimal_id(const char* value) {
++  if (!value || !*value) return false;
++  uint32_t parsed = 0;
++  for (const unsigned char* p = (const unsigned char*)value; *p; ++p) {
++    if (*p < '0' || *p > '9') return false;
++    const uint32_t digit = *p - '0';
++    if (parsed > (UINT32_MAX - digit) / 10) return false;
++    parsed = parsed * 10 + digit;
++  }
++  return parsed != 0;
++}
++
++static bool monitor_hex_string(const char* value, size_t min_bytes, size_t max_bytes,
++                               bool reject_zero) {
++  if (!value) return false;
++  const size_t n = strlen(value);
++  if ((n & 1) || n < min_bytes * 2 || n > max_bytes * 2) return false;
++  bool nonzero = false;
++  for (size_t i = 0; i < n; ++i) {
++    const char c = value[i];
++    const bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
++                     (c >= 'A' && c <= 'F');
++    if (!hex) return false;
++    if (c != '0') nonzero = true;
++  }
++  return !reject_zero || nonzero;
++}
++
++static bool monitor_command_allowed(const char* line) {
++  if (!line) return false;
++  static const char* const commands[] = {
++    "get name", "get public.key", "get role", "get radio", "get tx",
++    "get repeat", "ver", "clock", "stats-packets", "stats-radio", "stats-core",
++    "bot cap", "bot next", "bot advert-next",
++  };
++  for (const char* command : commands) {
++    if (strcmp(line, command) == 0) return true;
++  }
++  if (strncmp(line, "bot ack ", 8) == 0) return monitor_decimal_id(line + 8);
++  if (strncmp(line, "bot advert-ack ", 15) == 0) return monitor_decimal_id(line + 15);
++  if (strncmp(line, "bot send ", 9) == 0) {
++    const char* token = line + 9;
++    if (strlen(token) < 11 || token[8] != ' ') return false;
++    char token_copy[9];
++    memcpy(token_copy, token, 8);
++    token_copy[8] = 0;
++    if (!monitor_hex_string(token_copy, 4, 4, true)) return false;
++    return monitor_hex_string(token + 9, 1, 160, false);
++  }
++  if (strncmp(line, "time ", 5) != 0 || strlen(line + 5) != 10) return false;
++  uint64_t epoch = 0;
++  for (const unsigned char* p = (const unsigned char*)line + 5; *p; ++p) {
++    if (*p < '0' || *p > '9') return false;
++    epoch = epoch * 10 + (*p - '0');
++  }
++  return epoch <= 2147483647U;
++}
+diff --git a/examples/simple_repeater/RepeaterLocalInterfaces.inc b/examples/simple_repeater/RepeaterLocalInterfaces.inc
+new file mode 100644
+index 0000000..cdf03ec
+--- /dev/null
++++ b/examples/simple_repeater/RepeaterLocalInterfaces.inc
+@@ -0,0 +1,316 @@
++#if defined(ESP32)
++#include <Preferences.h>
++#include <WiFi.h>
++#include <lwip/sockets.h>
++#include <helpers/esp32/SerialBLEInterface.h>
++#elif defined(NRF52_PLATFORM)
++#include <helpers/nrf52/SerialBLEInterface.h>
++#endif
++
++#include "RepeaterConsoleLine.h"
++
++static constexpr size_t reply_capacity = 512;
++static constexpr uint32_t ble_off = UINT32_MAX;
++#ifdef REPEATER_DEFAULT_BLE_PIN
++static constexpr uint32_t default_ble_pin = REPEATER_DEFAULT_BLE_PIN;
++static_assert(default_ble_pin <= 999999, "Expected a six-digit BLE PIN");
++#else
++static constexpr uint32_t default_ble_pin = ble_off;
++#endif
++static SerialBLEInterface ble;
++static uint32_t active_ble_pin = default_ble_pin;
++static RepeaterConsoleLine ble_line;
++static char ble_reply[reply_capacity + 8];
++static size_t ble_reply_offset, ble_reply_length;
++
++static size_t make_monitor_reply(char* command, char* output, size_t capacity) {
++  char reply[reply_capacity] = {};
++  the_mesh.handleMonitorCommand(command, reply, sizeof(reply));
++  return snprintf(output, capacity, "  -> %s\r\n", reply[0] ? reply : "ERR empty reply");
++}
++
++#if defined(ESP32)
++static constexpr uint16_t monitor_port = 5001;
++static constexpr char settings_namespace[] = "repeater-io";
++
++struct RepeaterWifiSettings {
++  char ssid[33];
++  char password[65];
++  uint32_t monitor_ip;
++};
++
++static RepeaterWifiSettings wifi_settings = {};
++static WiFiServer wifi_server(monitor_port);
++static WiFiClient wifi_client;
++static bool wifi_listening = false;
++static uint32_t wifi_last_rx;
++static RepeaterConsoleLine wifi_line;
++static char wifi_reply[reply_capacity + 8];
++static size_t wifi_reply_offset, wifi_reply_length;
++
++static void reset_wifi_client() {
++  wifi_client.stop();
++  wifi_line = {};
++  wifi_reply_offset = wifi_reply_length = 0;
++}
++
++static void stop_wifi_listener() {
++  reset_wifi_client();
++  if (wifi_listening) wifi_server.stop();
++  wifi_listening = false;
++}
++
++static void apply_wifi_settings() {
++  stop_wifi_listener();
++  WiFi.persistent(false);
++  WiFi.disconnect();
++  if (wifi_settings.ssid[0]) {
++    WiFi.mode(WIFI_STA);
++    WiFi.setAutoReconnect(true);
++    WiFi.begin(wifi_settings.ssid, wifi_settings.password);
++  } else {
++    WiFi.mode(WIFI_OFF);
++  }
++}
++
++static void wifi_loop() {
++  if (!wifi_settings.ssid[0] || WiFi.status() != WL_CONNECTED) {
++    if (wifi_listening) stop_wifi_listener();
++    return;
++  }
++  if (!wifi_listening) {
++    wifi_server.begin();
++    wifi_listening = true;
++  }
++  if (!wifi_client || millis() - wifi_last_rx > 45000) reset_wifi_client();
++  if (WiFiClient candidate = wifi_server.accept()) {
++    if (wifi_client || candidate.remoteIP() != IPAddress(wifi_settings.monitor_ip)) {
++      candidate.stop();
++    } else {
++      wifi_client = candidate;
++      wifi_client.setNoDelay(true);
++      wifi_last_rx = millis();
++    }
++  }
++  if (!wifi_client) return;
++  if (wifi_reply_offset < wifi_reply_length) {
++    const int written = send(wifi_client.fd(), wifi_reply + wifi_reply_offset,
++                             wifi_reply_length - wifi_reply_offset, MSG_DONTWAIT);
++    if (written > 0) {
++      wifi_reply_offset += written;
++    } else if (written == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
++      reset_wifi_client();
++    }
++    return;
++  }
++  for (int budget = 0; budget < 96 && wifi_client.available(); ++budget) {
++    const int byte = wifi_client.read();
++    if (byte < 0) break;
++    wifi_last_rx = millis();
++    if (wifi_line.push(byte)) {
++      wifi_reply_length = make_monitor_reply(wifi_line.text, wifi_reply, sizeof(wifi_reply));
++      wifi_reply_offset = 0;
++      break;
++    }
++  }
++}
++
++static bool parse_wifi_settings(char* args, RepeaterWifiSettings& result) {
++  char* ssid = strchr(args, '|');
++  if (!ssid) return false;
++  *ssid++ = 0;
++  char* password = strchr(ssid, '|');
++  if (!password) return false;
++  *password++ = 0;
++  in_addr host;
++  if (inet_pton(AF_INET, args, &host) != 1 ||
++      !ssid[0] || strlen(ssid) >= sizeof(result.ssid) ||
++      strlen(password) < 8 || strlen(password) > 63) return false;
++  const IPAddress address(host.s_addr);
++  if (address[0] == 0 || address[0] == 127 || address[0] >= 224) return false;
++  strcpy(result.ssid, ssid);
++  strcpy(result.password, password);
++  result.monitor_ip = host.s_addr;
++  return true;
++}
++
++static bool handle_wifi_config(char* command, char* reply) {
++  if (!strcmp(command, "wifi status")) {
++    snprintf(reply, reply_capacity, "Wi-Fi %s, IP %s, monitor %s:%u",
++             !wifi_settings.ssid[0] ? "off" : WiFi.status() == WL_CONNECTED ? "connected" : "connecting",
++             WiFi.localIP().toString().c_str(),
++             IPAddress(wifi_settings.monitor_ip).toString().c_str(), monitor_port);
++  } else if (!strncmp(command, "wifi set ", 9) || !strcmp(command, "wifi off")) {
++    RepeaterWifiSettings next = {};
++    if (strncmp(command, "wifi set ", 9) == 0 && !parse_wifi_settings(command + 9, next)) {
++      strcpy(reply, "ERR use wifi set IPv4|SSID|WPA-password (8-63 bytes)");
++      return true;
++    }
++    Preferences settings;
++    if (!settings.begin(settings_namespace) ||
++        settings.putBytes("wifi-v1", &next, sizeof(next)) != sizeof(next)) {
++      strcpy(reply, "ERR Wi-Fi settings not saved");
++      return true;
++    }
++    settings.end();
++    wifi_settings = next;
++    apply_wifi_settings();
++    strcpy(reply, "OK");
++  } else {
++    return false;
++  }
++  return true;
++}
++
++static void load_local_settings() {
++  Preferences settings;
++  if (!settings.begin(settings_namespace, true)) return;
++  if (settings.getBytesLength("wifi-v1") == sizeof(wifi_settings)) {
++    settings.getBytes("wifi-v1", &wifi_settings, sizeof(wifi_settings));
++    wifi_settings.ssid[sizeof(wifi_settings.ssid) - 1] = 0;
++    wifi_settings.password[sizeof(wifi_settings.password) - 1] = 0;
++  }
++  active_ble_pin = settings.getUInt("ble-pin", default_ble_pin);
++  settings.end();
++  if (wifi_settings.ssid[0]) apply_wifi_settings();
++}
++
++static bool save_ble_pin(uint32_t pin) {
++  Preferences settings;
++  return settings.begin(settings_namespace) && settings.putUInt("ble-pin", pin) == sizeof(pin);
++}
++#elif defined(NRF52_PLATFORM)
++static constexpr char ble_settings_file[] = "/repeater-ble";
++static constexpr char ble_settings_temp[] = "/repeater-ble.tmp";
++
++struct RepeaterBleSettings {
++  uint32_t pin;
++  uint32_t bonds_pin;
++};
++
++static RepeaterBleSettings ble_settings = {default_ble_pin, ble_off};
++
++static void load_local_settings() {
++  auto file = InternalFS.open(ble_settings_file, FILE_O_READ);
++  RepeaterBleSettings stored;
++  if (file && file.size() == sizeof(stored) &&
++      file.read((uint8_t*)&stored, sizeof(stored)) == sizeof(stored)) {
++    ble_settings = stored;
++    active_ble_pin = stored.pin;
++  }
++}
++
++static bool save_ble_settings(const RepeaterBleSettings& next) {
++  if (InternalFS.exists(ble_settings_temp) && !InternalFS.remove(ble_settings_temp)) return false;
++  auto file = InternalFS.open(ble_settings_temp, FILE_O_WRITE);
++  if (!file) return false;
++  const bool written = file.write((const uint8_t*)&next, sizeof(next)) == sizeof(next);
++  file.close();
++  if (!written || !InternalFS.rename(ble_settings_temp, ble_settings_file)) return false;
++  ble_settings = next;
++  return true;
++}
++
++static bool save_ble_pin(uint32_t pin) {
++  return save_ble_settings({pin, pin == ble_settings.pin ? ble_settings.bonds_pin : ble_off});
++}
++#endif
++
++static void ble_loop() {
++  if (!ble.isEnabled()) return;
++  uint8_t input[MAX_FRAME_SIZE];
++  const size_t length = ble.checkRecvFrame(input);
++  if (!ble.isConnected()) {
++    ble_line = {};
++    ble_reply_offset = ble_reply_length = 0;
++    return;
++  }
++  for (size_t i = 0; i < length; ++i) {
++    if (ble_line.push(input[i]) && ble_reply_offset == ble_reply_length) {
++      ble_reply_length = make_monitor_reply(ble_line.text, ble_reply, sizeof(ble_reply));
++      ble_reply_offset = 0;
++    }
++  }
++  if (ble_reply_offset < ble_reply_length) {
++    // 20 байт помещаются даже при стандартном ATT MTU 23.
++    const size_t length = min((size_t)20, ble_reply_length - ble_reply_offset);
++    ble_reply_offset += ble.writeFrame((const uint8_t*)ble_reply + ble_reply_offset, length);
++  }
++}
++
++static void local_interfaces_begin() {
++  load_local_settings();
++  if (active_ble_pin > 999999) return;
++  char name[32];
++  snprintf(name, sizeof(name), "%s", the_mesh.getNodeName());
++#if defined(NRF52_PLATFORM)
++  ble.begin("Repeater-", name, active_ble_pin, /*enable_dfu=*/false);
++  if (ble_settings.bonds_pin != active_ble_pin) {
++    Bluefruit.Periph.clearBonds();
++    if (!save_ble_settings({active_ble_pin, active_ble_pin})) return;
++  }
++#else
++  ble.begin("Repeater-", name, active_ble_pin, /*bond=*/false);
++#endif
++  ble.enable();
++}
++
++static bool local_interfaces_active() {
++#if defined(ESP32)
++  if (wifi_settings.ssid[0]) return true;
++#endif
++  return ble.isEnabled();
++}
++
++static bool handle_local_config(char* command, char* reply) {
++#if defined(ESP32)
++  if (handle_wifi_config(command, reply)) return true;
++#endif
++  if (!strcmp(command, "ble status")) {
++    strcpy(reply, ble.isEnabled() ? "BLE on" : "BLE off");
++  } else if (!strncmp(command, "ble set ", 8) || !strcmp(command, "ble off")) {
++    uint32_t pin = ble_off;
++    if (strncmp(command, "ble set ", 8) == 0) {
++      const char* digits = command + 8;
++      if (strlen(digits) != 6 || strspn(digits, "0123456789") != 6) {
++        strcpy(reply, "ERR use ble set with a six-digit PIN");
++        return true;
++      }
++      pin = strtoul(digits, nullptr, 10);
++    }
++    if (!save_ble_pin(pin)) {
++      strcpy(reply, "ERR BLE settings not saved");
++      return true;
++    }
++    if (ble.isEnabled() && pin != active_ble_pin) ble.disable();
++    strcpy(reply, "OK - reboot to apply");
++  } else {
++    return false;
++  }
++  return true;
++}
++
++static void local_interfaces_loop() {
++  static RepeaterConsoleLine usb_line;
++  for (int budget = 0; budget < 96 && Serial.available(); ++budget) {
++    const int byte = Serial.read();
++    if (byte < 0) break;
++    if (usb_line.push(byte)) {
++      char reply[reply_capacity] = {};
++      char* command = usb_line.text;
++      if (!handle_local_config(command, reply)) {
++        if (!strncmp(command, "bot ", 4)) {
++          the_mesh.handleMonitorCommand(command, reply, sizeof(reply));
++        } else {
++          the_mesh.handleCommand(0, command, reply);
++        }
++      }
++      if (reply[0]) Serial.printf("  -> %s\r\n", reply);
++      break;
++    }
++  }
++#if defined(ESP32)
++  wifi_loop();
++#endif
++  ble_loop();
++}
+diff --git a/examples/simple_repeater/RepeaterPublic.h b/examples/simple_repeater/RepeaterPublic.h
+new file mode 100644
+index 0000000..a86a4a9
+--- /dev/null
++++ b/examples/simple_repeater/RepeaterPublic.h
+@@ -0,0 +1,33 @@
++#pragma once
++// Очередь Public в ОЗУ: обработчик радио ничего не печатает в USB и не ждёт NAS.
++struct RepeaterPublicEvent {
++  uint32_t id, timestamp;
++  int16_t rssi, snr4;
++  int8_t hops;
++  uint8_t size;
++  uint8_t text[160];
++};
++struct RepeaterPublicState {
++  bool initialized = false;
++  mesh::GroupChannel channel;
++  uint32_t boot = 0, sequence = 0, dropped = 0;
++  RepeaterPublicEvent queue[8];
++  uint8_t head = 0, count = 0;
++  uint32_t tokens[8] = {}, digests[8] = {};
++  uint8_t token_head = 0;
++  bool sent = false;
++  unsigned long last_tx = 0;
++};
++
++// Отдельная очередь не вытесняет сообщения Public.
++struct RepeaterAdvertEvent {
++  uint32_t id, sender_time, received_time;
++  int16_t rssi, snr4;
++  uint8_t key[32], data[32], size;
++  int8_t hops;
++};
++struct RepeaterAdvertState {
++  RepeaterAdvertEvent queue[16];
++  uint32_t sequence = 0, dropped = 0;
++  uint8_t head = 0, count = 0;
++};
+diff --git a/examples/simple_repeater/RepeaterPublic.inc b/examples/simple_repeater/RepeaterPublic.inc
+new file mode 100644
+index 0000000..5104161
+--- /dev/null
++++ b/examples/simple_repeater/RepeaterPublic.inc
+@@ -0,0 +1,123 @@
++// Расширение для локальных интерфейсов; административные радиокоманды его не вызывают.
++void MyMesh::initChannelBot() {
++  if (_channel_bot.initialized) return;
++  // Стандартный ключ Public из companion_radio, не ключ закрытого канала.
++  const uint8_t secret[16] = {0x8b,0x33,0x87,0xe9,0xc5,0xcd,0xea,0x6a,0xc9,0xe5,0xed,0xba,0xa1,0x15,0xcd,0x72};
++  memset(&_channel_bot.channel, 0, sizeof(_channel_bot.channel));
++  memcpy(_channel_bot.channel.secret, secret, sizeof(secret));
++  mesh::Utils::sha256(_channel_bot.channel.hash, sizeof(_channel_bot.channel.hash), secret, sizeof(secret));
++  getRNG()->random((uint8_t*)&_channel_bot.boot, sizeof(_channel_bot.boot));
++  _channel_bot.initialized = true;
++}
++
++int MyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
++  initChannelBot();
++  if (max_matches > 0 && memcmp(hash, _channel_bot.channel.hash, PATH_HASH_SIZE) == 0) {
++    channels[0] = _channel_bot.channel;
++    return 1;
++  }
++  return 0;
++}
++
++void MyMesh::onGroupDataRecv(mesh::Packet* pkt, uint8_t type, const mesh::GroupChannel&, uint8_t* data, size_t len) {
++  if (type != PAYLOAD_TYPE_GRP_TXT || len < 6 || (data[4] >> 2) != 0) return;
++  // У стандартного группового текста имя отправителя находится в самом тексте.
++  size_t size = strnlen((const char*)&data[5], len - 5);
++  if (size == 0 || size > 160) return;
++  if (_channel_bot.count == 8) { _channel_bot.dropped++; return; }
++  RepeaterPublicEvent& event = _channel_bot.queue[(_channel_bot.head + _channel_bot.count) % 8];
++  event.id = ++_channel_bot.sequence;
++  if (!event.id) event.id = ++_channel_bot.sequence;
++  memcpy(&event.timestamp, data, 4);
++  event.rssi = _radio->getLastRSSI();
++  event.snr4 = (int16_t)(_radio->getLastSNR() * 4);
++  // Flood path содержит уже пройденные репитеры; direct path имеет иной смысл.
++  event.hops = pkt->isRouteFlood() ? pkt->getPathHashCount() : -1;
++  event.size = size;
++  memcpy(event.text, &data[5], size);
++  _channel_bot.count++;
++  // Не помечаем DoNotRetransmit: Mesh::onRecvPacket продолжит routeRecvPacket.
++}
++
++void MyMesh::recordAdvert(mesh::Packet* pkt, const mesh::Identity& identity, uint32_t timestamp,
++                          const uint8_t* data, size_t len) {
++  initChannelBot();
++  if (len > 32) return;
++  if (_advert.count == 16) { ++_advert.dropped; return; }
++  RepeaterAdvertEvent& e = _advert.queue[(_advert.head + _advert.count) % 16];
++  e.id = ++_advert.sequence;
++  if (!e.id) e.id = ++_advert.sequence;
++  e.sender_time = timestamp; e.received_time = getRTCClock()->getCurrentTime();
++  e.rssi = _radio->getLastRSSI(); e.snr4 = (int16_t)(_radio->getLastSNR() * 4);
++  e.hops = pkt->isRouteFlood() ? pkt->getPathHashCount() : -1; e.size = len;
++  memcpy(e.key, identity.pub_key, 32); memcpy(e.data, data, len);
++  ++_advert.count;
++}
++
++bool MyMesh::handleChannelBotCommand(const char* command, char* reply, size_t capacity) {
++  if (strncmp(command, "bot ", 4) != 0) return false;
++  initChannelBot();
++  if (!strcmp(command, "bot advert-next")) {
++    if (!_advert.count) { snprintf(reply, capacity, "{\"empty\":true,\"dropped\":%lu}", (unsigned long)_advert.dropped); return true; }
++    const RepeaterAdvertEvent& e = _advert.queue[_advert.head];
++    char key[65], data[65]; mesh::Utils::toHex(key, e.key, 32); mesh::Utils::toHex(data, e.data, e.size);
++    snprintf(reply, capacity, "{\"id\":%lu,\"boot\":%lu,\"ts\":%lu,\"rx\":%lu,\"rssi\":%d,\"snr4\":%d,\"hops\":%d,\"key\":\"%s\",\"data\":\"%s\",\"dropped\":%lu}",
++      (unsigned long)e.id, (unsigned long)_channel_bot.boot, (unsigned long)e.sender_time,
++      (unsigned long)e.received_time, e.rssi, e.snr4, e.hops, key, data, (unsigned long)_advert.dropped);
++  } else if (!strncmp(command, "bot advert-ack ", 15)) {
++    char* end; unsigned long id = strtoul(command + 15, &end, 10);
++    if (*end || end == command + 15 || !_advert.count || _advert.queue[_advert.head].id != id) {
++      snprintf(reply, capacity, "ERR ack"); return true;
++    }
++    _advert.head = (_advert.head + 1) % 16; --_advert.count;
++    snprintf(reply, capacity, "OK ack");
++  } else if (!strcmp(command, "bot cap")) {
++    int max_text = 160 - (int)strnlen(_prefs.node_name, 32) - 2;
++    snprintf(reply, capacity, "{\"v\":1,\"channel\":\"Public\",\"advert\":1,\"boot\":%lu,\"max_text\":%d,\"dropped\":%lu}",
++             (unsigned long)_channel_bot.boot, max_text, (unsigned long)_channel_bot.dropped);
++  } else if (!strcmp(command, "bot next")) {
++    if (!_channel_bot.count) { snprintf(reply, capacity, "{\"empty\":true}"); return true; }
++    const RepeaterPublicEvent& e = _channel_bot.queue[_channel_bot.head];
++    char hex[321]; mesh::Utils::toHex(hex, e.text, e.size);
++    snprintf(reply, capacity, "{\"id\":%lu,\"boot\":%lu,\"ts\":%lu,\"rssi\":%d,\"snr4\":%d,\"hops\":%d,\"hex\":\"%s\"}",
++             (unsigned long)e.id, (unsigned long)_channel_bot.boot, (unsigned long)e.timestamp, e.rssi, e.snr4, e.hops, hex);
++  } else if (!strncmp(command, "bot ack ", 8)) {
++    char* end; unsigned long id = strtoul(command + 8, &end, 10);
++    if (*end || end == command + 8 || !_channel_bot.count || _channel_bot.queue[_channel_bot.head].id != id) {
++      snprintf(reply, capacity, "ERR ack"); return true;
++    }
++    _channel_bot.head = (_channel_bot.head + 1) % 8; _channel_bot.count--;
++    snprintf(reply, capacity, "OK ack");
++  } else if (!strncmp(command, "bot send ", 9)) {
++    // Токен делает повтор команды идемпотентным в пределах последних восьми отправок.
++    const char* token_hex = command + 9;
++    if (strlen(token_hex) < 10 || token_hex[8] != ' ') { snprintf(reply, capacity, "ERR syntax"); return true; }
++    char token_string[9]; memcpy(token_string, token_hex, 8); token_string[8] = 0;
++    uint8_t token_bytes[4];
++    if (!mesh::Utils::fromHex(token_bytes, 4, token_string)) { snprintf(reply, capacity, "ERR token"); return true; }
++    uint32_t token; memcpy(&token, token_bytes, 4);
++    if (!token) { snprintf(reply, capacity, "ERR token"); return true; }
++    const char* hex = token_hex + 9; size_t size = strlen(hex) / 2;
++    size_t name_len = strnlen(_prefs.node_name, 32);
++    if (!size || strlen(hex) % 2 || size + name_len + 2 > 160) { snprintf(reply, capacity, "ERR length"); return true; }
++    uint8_t text[160];
++    if (!mesh::Utils::fromHex(text, size, hex) || memchr(text, 0, size)) { snprintf(reply, capacity, "ERR text"); return true; }
++    uint32_t digest; mesh::Utils::sha256((uint8_t*)&digest, sizeof(digest), text, size);
++    for (int i = 0; i < 8; ++i) if (_channel_bot.tokens[i] == token) {
++      snprintf(reply, capacity, _channel_bot.digests[i] == digest ? "OK duplicate" : "ERR token reused"); return true;
++    }
++    unsigned long now = millis();
++    if (_channel_bot.sent && (unsigned long)(now - _channel_bot.last_tx) < 15000) { snprintf(reply, capacity, "ERR cooldown"); return true; }
++    uint8_t payload[165]; uint32_t ts = getRTCClock()->getCurrentTime();
++    memcpy(payload, &ts, 4); payload[4] = 0;
++    memcpy(&payload[5], _prefs.node_name, name_len); payload[5 + name_len] = ':'; payload[6 + name_len] = ' ';
++    memcpy(&payload[7 + name_len], text, size);
++    auto pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, _channel_bot.channel, payload, 7 + name_len + size);
++    if (!pkt) { snprintf(reply, capacity, "ERR queue"); return true; }
++    sendFloodScoped(default_scope, pkt, 0, _prefs.path_hash_mode + 1);
++    int i = _channel_bot.token_head; _channel_bot.tokens[i] = token; _channel_bot.digests[i] = digest;
++    _channel_bot.token_head = (i + 1) % 8; _channel_bot.sent = true; _channel_bot.last_tx = now;
++    snprintf(reply, capacity, "OK queued");
++  } else { snprintf(reply, capacity, "ERR unknown bot command"); }
++  return true;
++}
+diff --git a/examples/simple_repeater/main.cpp b/examples/simple_repeater/main.cpp
+index d475b13..e5273a1 100644
+--- a/examples/simple_repeater/main.cpp
++++ b/examples/simple_repeater/main.cpp
+@@ -6,6 +6,9 @@
+ #ifdef DISPLAY_CLASS
+   #include "UITask.h"
+   static UITask ui_task(board, display);
++  #ifdef REPEATER_LOCAL_INTERFACES
++    static bool display_ready;
++  #endif
+ #endif
+ 
+ #ifdef ETHERNET_ENABLED
+@@ -18,11 +21,17 @@ SimpleMeshTables tables;
+ 
+ MyMesh the_mesh(board, radio_driver, *new ArduinoMillis(), fast_rng, rtc_clock, tables);
+ 
++#ifdef REPEATER_LOCAL_INTERFACES
++#include "RepeaterLocalInterfaces.inc"
++#endif
++
+ void halt() {
+   while (1) ;
+ }
+ 
++#ifndef REPEATER_LOCAL_INTERFACES
+ static char command[160];
++#endif
+ #ifdef ETHERNET_ENABLED
+ static char ethernet_command[160];
+ #endif
+@@ -52,7 +61,12 @@ void setup() {
+ #endif
+ 
+ #ifdef DISPLAY_CLASS
++#ifdef REPEATER_LOCAL_INTERFACES
++  display_ready = display.begin();
++  if (display_ready) {
++#else
+   if (display.begin()) {
++#endif
+     display.startFrame();
+     display.setCursor(0, 0);
+     display.print("Please wait...");
+@@ -97,7 +111,9 @@ void setup() {
+   Serial.print("Repeater ID: ");
+   mesh::Utils::printHex(Serial, the_mesh.self_id.pub_key, PUB_KEY_SIZE); Serial.println();
+ 
++#ifndef REPEATER_LOCAL_INTERFACES
+   command[0] = 0;
++#endif
+ #ifdef ETHERNET_ENABLED
+   ethernet_command[0] = 0;
+ #endif
+@@ -106,7 +122,14 @@ void setup() {
+ 
+   the_mesh.begin(fs);
+ 
++#ifdef REPEATER_LOCAL_INTERFACES
++  local_interfaces_begin();
++#endif
++
+ #ifdef DISPLAY_CLASS
++#ifdef REPEATER_LOCAL_INTERFACES
++  if (display_ready)
++#endif
+   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
+ #endif
+ 
+@@ -123,6 +146,9 @@ void setup() {
+ }
+ 
+ void loop() {
++#ifdef REPEATER_LOCAL_INTERFACES
++  local_interfaces_loop();
++#else
+   // Handle Serial CLI
+   int len = strlen(command);
+   // `command` must stay NUL-terminated within its bounds. If it ever isn't,
+@@ -164,6 +190,7 @@ void loop() {
+ 
+     command[0] = 0;  // reset command buffer
+   }
++#endif
+ 
+   board.loop();   // let the board feed its watchdog, run periodic housekeeping
+ 
+@@ -198,12 +225,18 @@ void loop() {
+   the_mesh.loop();
+   sensors.loop();
+ #ifdef DISPLAY_CLASS
++#ifdef REPEATER_LOCAL_INTERFACES
++  if (display_ready)
++#endif
+   ui_task.loop();
+ #endif
+   rtc_clock.tick();
+ 
+ #ifdef HAS_EXTERNAL_WATCHDOG
+   external_watchdog.loop();
++#endif
++#ifdef REPEATER_LOCAL_INTERFACES
++  if (local_interfaces_active()) return;
+ #endif
+   if (the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork()) {
+ #if defined(NRF52_PLATFORM)
+diff --git a/src/helpers/esp32/SerialBLEInterface.cpp b/src/helpers/esp32/SerialBLEInterface.cpp
+index 6371cf3..0b08710 100644
+--- a/src/helpers/esp32/SerialBLEInterface.cpp
++++ b/src/helpers/esp32/SerialBLEInterface.cpp
+@@ -10,7 +10,7 @@
+ 
+ #define ADVERT_RESTART_DELAY  1000   // millis
+ 
+-void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code) {
++void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code, bool bond) {
+   _pin_code = pin_code;
+ 
+   if (strcmp(name, "@@MAC") == 0) {
+@@ -30,7 +30,18 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
+ 
+   BLESecurity  sec;
+   sec.setStaticPIN(pin_code);
+-  sec.setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
++  sec.setAuthenticationMode(bond ? ESP_LE_AUTH_REQ_SC_MITM_BOND : ESP_LE_AUTH_REQ_SC_MITM);
++  if (!bond) {
++    // Сопряжения, оставшиеся от предыдущей прошивки, не должны обходить новый PIN.
++    int count = esp_ble_get_bond_device_num();
++    if (count > 0) {
++      auto* devices = new esp_ble_bond_dev_t[count];
++      if (esp_ble_get_bond_device_list(&count, devices) == ESP_OK) {
++        for (int i = 0; i < count; ++i) esp_ble_remove_bond_device(devices[i].bd_addr);
++      }
++      delete[] devices;
++    }
++  }
+ 
+   //BLEDevice::setPower(ESP_PWR_LVL_N8);
+ 
+diff --git a/src/helpers/esp32/SerialBLEInterface.h b/src/helpers/esp32/SerialBLEInterface.h
+index 9fb6adb..6116219 100644
+--- a/src/helpers/esp32/SerialBLEInterface.h
++++ b/src/helpers/esp32/SerialBLEInterface.h
+@@ -73,7 +73,7 @@ public:
+    * @param name  IN/OUT - a name for the device (combined with prefix). If "@@MAC", is modified and returned
+    * @param pin_code   the BLE security pin
+    */
+-  void begin(const char* prefix, char* name, uint32_t pin_code);
++  void begin(const char* prefix, char* name, uint32_t pin_code, bool bond = true);
+ 
+   // BaseSerialInterface methods
+   void enable() override;
+diff --git a/src/helpers/nrf52/SerialBLEInterface.cpp b/src/helpers/nrf52/SerialBLEInterface.cpp
+index 6ed16bc..c39cd8b 100644
+--- a/src/helpers/nrf52/SerialBLEInterface.cpp
++++ b/src/helpers/nrf52/SerialBLEInterface.cpp
+@@ -123,11 +123,11 @@ void SerialBLEInterface::onBLEEvent(ble_evt_t* evt) {
+   }
+ }
+ 
+-void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code) {
++void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code, bool enable_dfu) {
+   instance = this;
+ 
+   char charpin[20];
+-  snprintf(charpin, sizeof(charpin), "%lu", (unsigned long)pin_code);
++  snprintf(charpin, sizeof(charpin), "%06lu", (unsigned long)pin_code);
+   
+   #ifdef DISABLE_BLE_LED  // use variant platformio.ini build_flags macro: -D DISABLE_BLE_LED
+     Bluefruit.autoConnLed(false);  // false removes the automatic control of the LED by the Bluefruit library
+@@ -189,8 +189,10 @@ void SerialBLEInterface::begin(const char* prefix, char* name, uint32_t pin_code
+ 
+   // Register DFU on the main BLE stack so paired clients can discover it
+   // without switching the device into a separate OTA-only BLE mode first.
+-  bledfu.setPermission(SECMODE_ENC_WITH_MITM, SECMODE_ENC_WITH_MITM);
+-  bledfu.begin();
++  if (enable_dfu) {
++    bledfu.setPermission(SECMODE_ENC_WITH_MITM, SECMODE_ENC_WITH_MITM);
++    bledfu.begin();
++  }
+ 
+   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+   Bluefruit.Advertising.addTxPower();
+diff --git a/src/helpers/nrf52/SerialBLEInterface.h b/src/helpers/nrf52/SerialBLEInterface.h
+index de10305..f545ab4 100644
+--- a/src/helpers/nrf52/SerialBLEInterface.h
++++ b/src/helpers/nrf52/SerialBLEInterface.h
+@@ -59,7 +59,7 @@ public:
+    * @param name  IN/OUT - a name for the device (combined with prefix). If "@@MAC", is modified and returned
+    * @param pin_code   the BLE security pin
+    */
+-  void begin(const char* prefix, char* name, uint32_t pin_code);
++  void begin(const char* prefix, char* name, uint32_t pin_code, bool enable_dfu = true);
+ 
+   void disconnect();
+   void enable() override;
+diff --git a/tests/repeater/console.cpp b/tests/repeater/console.cpp
+new file mode 100644
+index 0000000..9744c42
+--- /dev/null
++++ b/tests/repeater/console.cpp
+@@ -0,0 +1,53 @@
++#include <cassert>
++#include <cstring>
++
++#include "RepeaterConsoleLine.h"
++#include "RepeaterConsolePolicy.h"
++
++static bool feed(RepeaterConsoleLine& line, const char* input) {
++  bool ready = false;
++  while (*input) ready = line.push(*input++) || ready;
++  return ready;
++}
++
++int main() {
++  const char* accepted[] = {
++    "get name", "get public.key", "get role", "get radio", "get tx", "get repeat",
++    "ver", "clock", "stats-packets", "stats-radio", "stats-core", "time 1760000000",
++    "bot cap", "bot next", "bot ack 4294967295", "bot advert-next", "bot advert-ack 1",
++    "bot send 00000001 00FF",
++  };
++  for (const char* command : accepted) assert(monitor_command_allowed(command));
++
++  const char* rejected[] = {
++    "", "get prv.key", "get guest.password", "get acl", "reboot", "start ota", "password example",
++    "set repeat off", "set name test", "wifi status", "wifi off", "ble off",
++    "bot ack 0", "bot ack 4294967296", "bot ack -1", "bot ack 1 trailing",
++    "bot advert-ack 00", "bot send 00000000 AB", "bot send 00000001 A",
++    "bot send 00000001 G0", "bot send 00000001AB", "bot send 00000001 ",
++    "time 2147483648", "time 17600000000", "time 176000000x",
++    "get name ", "get name\nreboot", "AB|get name",
++  };
++  for (const char* command : rejected) assert(!monitor_command_allowed(command));
++
++  RepeaterConsoleLine line;
++  assert(!feed(line, "bot ad"));
++  assert(feed(line, "vert-next\r"));
++  assert(!strcmp(line.text, "bot advert-next"));
++  assert(!line.push('\n'));
++  assert(feed(line, "get nix\b\bame\n"));
++  assert(!strcmp(line.text, "get name"));
++
++  for (size_t i = 0; i < sizeof(line.text) + 8; ++i) assert(!line.push('X'));
++  assert(!feed(line, "bot ack 1\r\n"));
++  assert(feed(line, "bot cap\r"));
++  assert(!strcmp(line.text, "bot cap"));
++
++  assert(!feed(line, "get name"));
++  assert(!line.push(0));
++  assert(!feed(line, "bot ack 1\n"));
++  assert(feed(line, "bot next\r"));
++  assert(!strcmp(line.text, "bot next"));
++  assert(line.push('\r'));  // Пустая USB-строка завершает загрузку регионов.
++  assert(!strcmp(line.text, ""));
++}
+diff --git a/variants/heltec_v4/platformio.ini b/variants/heltec_v4/platformio.ini
+index 76e8e71..dddae75 100644
+--- a/variants/heltec_v4/platformio.ini
++++ b/variants/heltec_v4/platformio.ini
+@@ -102,6 +102,18 @@ lib_deps =
+   ${esp32_ota.lib_deps}
+   bakercp/CRC32 @ ^2.0.0
+ 
++[env:heltec_v4_repeater_connect]
++extends = env:heltec_v4_repeater
++build_flags =
++  ${env:heltec_v4_repeater.build_flags}
++  -D REPEATER_LOCAL_INTERFACES
++build_src_filter = ${env:heltec_v4_repeater.build_src_filter}
++  +<helpers/esp32/SerialBLEInterface.cpp>
++lib_deps =
++  ${env:heltec_v4_repeater.lib_deps}
++  Preferences
++  WiFi
++
+ [env:heltec_v4_expansionkit_repeater]
+ extends = heltec_v4_oled
+ build_flags =
+diff --git a/variants/promicro/platformio.ini b/variants/promicro/platformio.ini
+index da27c2f..eadd642 100644
+--- a/variants/promicro/platformio.ini
++++ b/variants/promicro/platformio.ini
+@@ -56,6 +56,14 @@ build_flags =
+ lib_deps = ${Promicro.lib_deps}
+   adafruit/RTClib @ ^2.1.3
+ 
++[env:ProMicro_repeater_connect]
++extends = env:ProMicro_repeater
++build_flags =
++  ${env:ProMicro_repeater.build_flags}
++  -D REPEATER_LOCAL_INTERFACES
++build_src_filter = ${env:ProMicro_repeater.build_src_filter}
++  +<helpers/nrf52/SerialBLEInterface.cpp>
++
+ [env:ProMicro_repeater_bridge_rs232_serial1]
+ extends = Promicro
+ build_src_filter = ${Promicro.build_src_filter}
+@@ -178,4 +186,4 @@ lib_deps =
+ [env:ProMicro_kiss_modem]
+ extends = Promicro
+ build_src_filter = ${Promicro.build_src_filter}
+-  +<../examples/kiss_modem/>
+\ No newline at end of file
++  +<../examples/kiss_modem/>
