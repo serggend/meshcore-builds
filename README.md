@@ -1,27 +1,32 @@
 # Сборки MeshCore
 
-Каталог прошивок для стационарных LoRa-репитеров. Первый предварительный выпуск основан на MeshCore 1.18.0. [Все выпуски](https://github.com/serggend/meshcore-builds/releases)
+Прошивки стационарных LoRa-репитеров на базе MeshCore 1.18.0. Скачивание начинается по ссылкам в таблице. [Все выпуски](https://github.com/serggend/meshcore-builds/releases)
 
-| Плата | Что умеет | Скачать v0.1.0-preview.1 |
+| Плата | Репитер с консолью · v0.1.0-preview.1 | Репитер с BLE Companion · v0.2.0-preview.1 |
 | --- | --- | --- |
-| Heltec WiFi LoRa 32 V4 с OLED | Ретрансляция MeshCore, USB-консоль, Wi-Fi для MeshDash, BLE-терминал | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-app.bin) |
-| FakeTec V4 с ProMicro nRF52840 и HT-RA62 | Ретрансляция MeshCore, USB-консоль, BLE-терминал. Экран SSD1306 опционален | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/faketec-v4-repeater-connect.uf2) |
+| **Heltec WiFi LoRa 32 V4 OLED** | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-app.bin) | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/heltec-v4-oled-repeater-companion-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/heltec-v4-oled-repeater-companion-app.bin) |
+| **FakeTec V4 · ProMicro nRF52840 + HT-RA62** | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/faketec-v4-repeater-connect.uf2) | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/faketec-v4-repeater-companion.uf2) |
 
-[Контрольные суммы SHA-256](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [Инструкция по установке](#установка-и-откат)
+Контрольные суммы SHA-256 для сборок. [репитер с консолью](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [репитер с Companion](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/SHA256SUMS). [Инструкция по установке](#установка-и-откат)
 
-По USB доступны штатные команды настройки репитера. Текстовая консоль BLE и TCP на Heltec дают доступ к статистике, объявлениям и обмену сообщениями Public. Для очередей Public и объявлений используй один экземпляр MeshDash на плату. У FakeTec в этой конфигурации есть USB и BLE.
+### Какую сборку выбрать
 
-**Статус проверки.** Прошивки предварительные. Аппаратные проверки старта, сопряжения, Wi-Fi и ретрансляции ещё впереди. BLE в этом выпуске работает через терминал Nordic UART. Поддержка обычного приложения MeshCore описана в разделе ниже.
+| Профиль | Возможности | Что учесть |
+| --- | --- | --- |
+| Репитер с консолью | USB, BLE-терминал Nordic UART и Wi-Fi на Heltec. Подходит для стационарной работы с MeshDash, статистикой, объявлениями и Public | Меньше кода и расход статической ОЗУ. BLE работает в текстовом терминале |
+| Репитер с BLE Companion | Штатное приложение MeshCore, контакты, личка и 40 слотов каналов. Остаются USB и Wi-Fi для MeshDash на Heltec | Примерно на 84 КиБ больше статической ОЗУ и на 33 КиБ больше кода в локальных сборках. Обе роли делят время одного LoRa-радиомодуля. Задержку и энергопотребление ещё надо измерить |
+
+У FakeTec доступны USB и BLE, SSD1306 опционален. Для очередей Public и объявлений используй один экземпляр MeshDash на плату. Прошивки предварительные. Проверены сборка, формат файлов и отдельные сценарии на компьютере. Проверки с телефоном и реальными LoRa-нодами ещё впереди.
 
 ## Установка и откат
 
-Скачай файл под свою плату и `SHA256SUMS` из одного выпуска. Контрольные суммы можно проверить командой `shasum -a 256 -c SHA256SUMS` в папке с файлами выпуска.
+Скачай файл и контрольные суммы из одного столбца. Сверь SHA-256 нужного файла командой `shasum -a 256 ИМЯ_ФАЙЛА` со строкой в `SHA256SUMS`.
 
 ### Heltec V4 OLED
 
 Для первой установки запиши объединённый образ по адресу `0x0`. Перед обновлением сохрани полный дамп флеша, сверь таблицу разделов и активный слот. Приложение по адресу `0x10000` предназначено для штатного слота `app0`. Запись только приложения в этот слот сохраняет разделы настроек.
 
-Пример для esptool 4.x и Heltec с флешем 16 МиБ. Подставь порт платы вместо `PORT`.
+Пример для esptool 4.x и Heltec с флешем 16 МиБ. Подставь порт платы вместо `PORT`. Для гибридной версии подставь имя скачанного файла с `-companion-`.
 
 ```sh
 # Резервная копия
@@ -46,25 +51,26 @@ esptool.py --chip esp32s3 --port PORT write_flash 0x0 heltec-backup.bin
 Открой USB-терминал на 115200 бод с отправкой конца строки. Проверь `get role`, `get repeat` и `get radio`. Для администрирования через LoRa на новой плате задай пароль командой `password <пароль>`. Заводской пароль `password` отключается при запуске. Сверь частоту и параметры с радиопрофилем своей сети.
 
 - **Wi-Fi на Heltec.** Введи `wifi set <IPv4 компьютера с MeshDash>|<SSID>|<пароль Wi-Fi>`. Команда `wifi status` покажет адрес репитера. Выбери TCP-транспорт репитера в MeshDash и порт `5001`. TCP работает в доверенной локальной сети без шифрования и принимает соединение от указанного IPv4. `wifi off` отключает Wi-Fi и удаляет сохранённые параметры.
-- **BLE на обеих платах.** Введи `ble set <шесть цифр>`, затем `reboot`. В BLE-терминале выбери устройство с именем `Repeater-…` и сервис Nordic UART. Включи уведомления TX и для проверки отправь `get role` с концом строки. `ble off` выключает BLE. Для изменения PIN достаточно USB, экран для настройки не требуется.
+- **BLE на обеих платах.** Введи `ble set <шесть цифр>`, затем `reboot`. Для консольной сборки в BLE-терминале выбери устройство `Repeater-…` и сервис Nordic UART. Включи уведомления TX и для проверки отправь `get role` с концом строки. `ble off` выключает BLE. Для изменения PIN достаточно USB, экран для настройки не требуется.
 
 ## Сборка из исходников
 
-Скрипт загружает [зафиксированный снимок MeshCore 1.18.0](https://github.com/meshcore-dev/MeshCore/tree/81dbae592ffad40b4212bc0b37e82b38da08f4bc), накладывает [патч репитера](patches/repeater-connect.patch), проверяет разбор команд и собирает файлы в `dist/`. Версии библиотек указаны в [конфигурации выпуска](platformio.releases.ini). [Лицензии зависимостей](THIRD-PARTY.md)
+Скрипт загружает [зафиксированный снимок MeshCore 1.18.0](https://github.com/meshcore-dev/MeshCore/tree/81dbae592ffad40b4212bc0b37e82b38da08f4bc), накладывает [патч репитера](patches/repeater-connect.patch) и, для гибридного профиля, [патч Companion](patches/repeater-companion.patch). После тестов файлы появляются в `dist/repeater/` или `dist/companion/`. Версии библиотек указаны в [конфигурации выпуска](platformio.releases.ini). [Лицензии зависимостей](THIRD-PARTY.md)
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install platformio==6.2.0
-./scripts/build.sh
+./scripts/build.sh repeater
+./scripts/build.sh companion
 ```
 
 Нужны Git, curl и компилятор C++ с ASan и UBSan. [Сборки GitHub Actions](https://github.com/serggend/meshcore-builds/actions)
 
 ## Подключение из приложения MeshCore
 
-Для отдельной версии нужен полный режим Companion через BLE. В него входят контакты, отправка и приём личных сообщений с подтверждениями, Public и остальные каналы. Подключение телефона не должно влиять на штатную пересылку и удалённое управление репитером через LoRa. USB и TCP для MeshDash продолжают использовать консоль репитера.
+Установи гибридную сборку. Задай PIN по USB командой `ble set <шесть цифр>` и введи `reboot`. В обычном MeshCore выбери устройство `MeshCore-…`. Для лички разошли объявление из приложения или поделись ключом Companion. Ключ репитера сохранится для маршрутов и удалённого управления. Частоту, мощность и PIN задавай в USB-консоли.
 
-Обе роли делят один SX1262 и один радиопрофиль. Нужно использовать двоичный протокол и логику штатного Companion, сохранив правила пересылки, региональные настройки и ключ существующего репитера. На стенде надо проверить, как обычное приложение классифицирует узел для личных сообщений. Если ему нужен контакт типа Companion, этой роли понадобится отдельный ключ при сохранении идентичности репитера. [Протокол MeshCore Companion](https://docs.meshcore.io/companion_protocol/)
+Телефон можно отключить. Репитер продолжит пересылку, а Companion будет принимать сообщения в очередь на 64 записи в ОЗУ до следующей синхронизации. Очередь очищается при перезагрузке. Выключение BLE командой `ble off` также выключает приём новых сообщений Companion. Очередь MeshDash живёт отдельно.
 
-Проверка для каждой платы включает подключение из обычного приложения, двустороннюю личку с подтверждениями, Public и закрытый канал. Две внешние ноды должны обмениваться через репитер с подключённым телефоном, после отключения BLE и после перезагрузки платы. Публикация этой версии зависит от результатов аппаратной проверки.
+На FakeTec контакты и каналы Companion хранятся в ExtraFS по адресу `0xD4000`. Настройки и ключ репитера остаются в InternalFS. Для проверки версии на стенде нужны две внешние ноды и телефон. Сценарии включают двустороннюю личку с подтверждением, Public и закрытый канал, а также пересылку между внешними нодами до и после отключения телефона. [Протокол MeshCore Companion](https://docs.meshcore.io/companion_protocol/)
