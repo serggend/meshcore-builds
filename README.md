@@ -2,12 +2,12 @@
 
 Прошивки стационарных LoRa-репитеров на базе MeshCore 1.18.0. Скачивание начинается по ссылкам в таблице. [Все выпуски](https://github.com/serggend/meshcore-builds/releases)
 
-| Плата | Репитер с консолью · v0.1.0-preview.1 | Репитер с BLE Companion · v0.2.0-preview.1 |
+| Плата | Репитер с консолью · v0.1.0-preview.1 | Репитер с BLE Companion · v0.2.0-preview.2 |
 | --- | --- | --- |
-| **Heltec WiFi LoRa 32 V4 OLED** | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-app.bin) | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/heltec-v4-oled-repeater-companion-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/heltec-v4-oled-repeater-companion-app.bin) |
-| **FakeTec V4 · ProMicro nRF52840 + HT-RA62** | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/faketec-v4-repeater-connect.uf2) | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/faketec-v4-repeater-companion.uf2) |
+| **Heltec WiFi LoRa 32 V4 OLED** | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-app.bin) | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/heltec-v4-oled-repeater-companion-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/heltec-v4-oled-repeater-companion-app.bin) |
+| **FakeTec V4 · ProMicro nRF52840 + HT-RA62** | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/faketec-v4-repeater-connect.uf2) | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/faketec-v4-repeater-companion.uf2) |
 
-Контрольные суммы SHA-256 для сборок. [репитер с консолью](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [репитер с Companion](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.1/SHA256SUMS). [Инструкция по установке](#установка-и-откат)
+Контрольные суммы SHA-256 для сборок. [репитер с консолью](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [репитер с Companion](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/SHA256SUMS). [Инструкция по установке](#установка-и-откат)
 
 ### Какую сборку выбрать
 
