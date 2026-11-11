@@ -248,7 +248,7 @@ index 06c56a7..25c1fcc 100644
  
  uint8_t DataStore::getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) {
 diff --git a/examples/companion_radio/MyMesh.cpp b/examples/companion_radio/MyMesh.cpp
-index f32ea67..14b312a 100644
+index f32ea67..1acb8f3 100644
 --- a/examples/companion_radio/MyMesh.cpp
 +++ b/examples/companion_radio/MyMesh.cpp
 @@ -1,3 +1,9 @@
@@ -562,7 +562,7 @@ index f32ea67..14b312a 100644
    }
    if (pkt) {
      sendZeroHop(pkt);
-@@ -2452,3 +2558,64 @@ bool MyMesh::advert() {
+@@ -2452,3 +2558,68 @@ bool MyMesh::advert() {
  bool MyMesh::hasPendingWork() const {
    return _mgr->getOutboundTotal() > 0 || dirty_contacts_expiry != 0;
  }
@@ -611,6 +611,10 @@ index f32ea67..14b312a 100644
 +  return true;
 +}
 +
++void receiveRaw(float snr, float rssi, const uint8_t raw[], int len) {
++  if (companion && serial->isEnabled()) companion->logRxRaw(snr, rssi, raw, len);
++}
++
 +void receive(const mesh::Packet& packet) {
 +  if (companion && serial->isEnabled()) companion->receiveForRepeater(packet);
 +}
@@ -628,10 +632,10 @@ index f32ea67..14b312a 100644
 +}
 +#endif
 diff --git a/examples/companion_radio/MyMesh.h b/examples/companion_radio/MyMesh.h
-index 944790d..5638b87 100644
+index 944790d..ab15afc 100644
 --- a/examples/companion_radio/MyMesh.h
 +++ b/examples/companion_radio/MyMesh.h
-@@ -108,7 +108,17 @@ public:
+@@ -108,7 +108,18 @@ public:
        virtual ~Listener() { }
    };
  
@@ -644,13 +648,24 @@ index 944790d..5638b87 100644
 +
 +#ifdef REPEATER_COMPANION
 +  bool beginForRepeater();
++  void logRxRaw(float snr, float rssi, const uint8_t raw[], int len) override;
 +  void receiveForRepeater(const mesh::Packet& packet);
 +  void onQueuedPacket(const mesh::Packet* packet) override;
 +#endif
  
    void begin();
    void startInterface(BaseSerialInterface &serial);
-@@ -195,8 +205,10 @@ protected:
+@@ -144,7 +155,9 @@ protected:
+   void sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis=0) override;
+   void sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis=0) override;
+ 
++#ifndef REPEATER_COMPANION
+   void logRxRaw(float snr, float rssi, const uint8_t raw[], int len) override;
++#endif
+   bool isAutoAddEnabled() const override;
+   bool shouldAutoAddContactType(uint8_t type) const override;
+   bool shouldOverwriteWhenFull() const override;
+@@ -195,8 +208,10 @@ protected:
  
  public:
    void savePrefs() {
@@ -661,7 +676,7 @@ index 944790d..5638b87 100644
      _store->savePrefs(_prefs);
      _prefs.clearDirty();
    }
-@@ -216,6 +228,21 @@ public:
+@@ -216,6 +231,21 @@ public:
    bool hasPendingWork() const;
  
  private:
@@ -683,7 +698,7 @@ index 944790d..5638b87 100644
    void writeOKFrame();
    void writeErrFrame(uint8_t err_code);
    void writeDisabledFrame();
-@@ -240,6 +267,9 @@ private:
+@@ -240,6 +270,9 @@ private:
    void saveContacts();
  
    DataStore* _store;
@@ -694,7 +709,7 @@ index 944790d..5638b87 100644
    uint32_t pending_login;
    uint32_t pending_status;
 diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
-index c44e3f1..aec9bc8 100644
+index c44e3f1..414a7e0 100644
 --- a/examples/simple_repeater/MyMesh.cpp
 +++ b/examples/simple_repeater/MyMesh.cpp
 @@ -1,4 +1,7 @@
@@ -705,7 +720,17 @@ index c44e3f1..aec9bc8 100644
  #include <algorithm>
  
  /* ------------------------------ Config -------------------------------- */
-@@ -477,6 +480,9 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+@@ -468,6 +471,9 @@ const char *MyMesh::getLogDateTime() {
+ }
+ 
+ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
++#ifdef REPEATER_COMPANION
++  repeater_companion::receiveRaw(snr, rssi, raw, len);
++#endif
+ #if MESH_PACKET_LOGGING
+   Serial.print(getLogDateTime());
+   Serial.print(" RAW: ");
+@@ -477,6 +483,9 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
  }
  
  void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
@@ -715,7 +740,7 @@ index c44e3f1..aec9bc8 100644
  #ifdef WITH_BRIDGE
    if (_prefs.bridge_pkt_src == 1) {
      bridge.sendPacket(pkt);
-@@ -865,7 +871,11 @@ void MyMesh::sendNodeDiscoverReq() {
+@@ -865,7 +874,11 @@ void MyMesh::sendNodeDiscoverReq() {
  
  MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondClock &ms, mesh::RNG &rng,
                 mesh::RTCClock &rtc, mesh::MeshTables &tables)
@@ -743,10 +768,10 @@ index 8b31175..c248aa4 100644
  #endif
 diff --git a/examples/simple_repeater/RepeaterCompanion.h b/examples/simple_repeater/RepeaterCompanion.h
 new file mode 100644
-index 0000000..2dc6ef7
+index 0000000..5c1b50c
 --- /dev/null
 +++ b/examples/simple_repeater/RepeaterCompanion.h
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,12 @@
 +#pragma once
 +
 +#include <Mesh.h>
@@ -755,6 +780,7 @@ index 0000000..2dc6ef7
 +namespace repeater_companion {
 +bool begin(mesh::Mesh& repeater, mesh::Radio& radio, mesh::PacketManager& pool,
 +           BaseSerialInterface& ble, uint32_t pin);
++void receiveRaw(float snr, float rssi, const uint8_t raw[], int len);
 +void receive(const mesh::Packet& packet);
 +void loop(float frequency, float bandwidth, uint8_t sf, uint8_t cr, int8_t power);
 +}
