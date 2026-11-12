@@ -1169,3 +1169,28 @@ index eadd642..705c787 100644
  [env:ProMicro_repeater_bridge_rs232_serial1]
  extends = Promicro
  build_src_filter = ${Promicro.build_src_filter}
+diff --git a/variants/heltec_v3/platformio.ini b/variants/heltec_v3/platformio.ini
+--- a/variants/heltec_v3/platformio.ini
++++ b/variants/heltec_v3/platformio.ini
+@@ -69,6 +69,21 @@
+   Preferences
+   WiFi
+ 
++[env:Heltec_v3_repeater_companion]
++extends = env:Heltec_v3_repeater_connect
++build_flags =
++  ${env:Heltec_v3_repeater_connect.build_flags}
++  -D REPEATER_COMPANION
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D OFFLINE_QUEUE_SIZE=64
++build_src_filter = ${env:Heltec_v3_repeater_connect.build_src_filter}
++  +<../examples/companion_radio/MyMesh.cpp>
++  +<../examples/companion_radio/DataStore.cpp>
++lib_deps =
++  ${env:Heltec_v3_repeater_connect.lib_deps}
++  densaugeo/base64 @ 1.4.0
++
+ [env:Heltec_v3_repeater_bridge_rs232]
+ extends = Heltec_lora32_v3
+ build_flags =

@@ -992,3 +992,25 @@ index da27c2f..eadd642 100644
 -  +<../examples/kiss_modem/>
 \ No newline at end of file
 +  +<../examples/kiss_modem/>
+diff --git a/variants/heltec_v3/platformio.ini b/variants/heltec_v3/platformio.ini
+--- a/variants/heltec_v3/platformio.ini
++++ b/variants/heltec_v3/platformio.ini
+@@ -57,6 +57,18 @@
+   ${esp32_ota.lib_deps}
+   bakercp/CRC32 @ ^2.0.0
+ 
++[env:Heltec_v3_repeater_connect]
++extends = env:Heltec_v3_repeater
++build_flags =
++  ${env:Heltec_v3_repeater.build_flags}
++  -D REPEATER_LOCAL_INTERFACES
++build_src_filter = ${env:Heltec_v3_repeater.build_src_filter}
++  +<helpers/esp32/SerialBLEInterface.cpp>
++lib_deps =
++  ${env:Heltec_v3_repeater.lib_deps}
++  Preferences
++  WiFi
++
+ [env:Heltec_v3_repeater_bridge_rs232]
+ extends = Heltec_lora32_v3
+ build_flags =

@@ -38,13 +38,20 @@ fi
 
 # Сборка для распространения, каждый владелец задаёт PIN по USB.
 unset PLATFORMIO_BUILD_FLAGS
-heltec="heltec_v4_repeater_$profile_suffix"
-faketec="ProMicro_repeater_$profile_suffix"
-pio run -e "$heltec" -t mergebin
-pio run -e "$faketec" -t create_uf2
+for board in Heltec_v3 heltec_v4; do
+  case "$board" in
+    Heltec_v3) model=v3 ;;
+    heltec_v4) model=v4 ;;
+  esac
+  env_name="${board}_repeater_$profile_suffix"
+  artifact="heltec-$model-oled-repeater-$profile_suffix"
+  pio run -e "$env_name" -t mergebin
+  cp ".pio/build/$env_name/firmware-merged.bin" "$build_dir/dist/$artifact-merged.bin"
+  cp ".pio/build/$env_name/firmware.bin" "$build_dir/dist/$artifact-app.bin"
+done
 
-cp ".pio/build/$heltec/firmware-merged.bin" "$build_dir/dist/heltec-v4-oled-repeater-$profile_suffix-merged.bin"
-cp ".pio/build/$heltec/firmware.bin" "$build_dir/dist/heltec-v4-oled-repeater-$profile_suffix-app.bin"
+faketec="ProMicro_repeater_$profile_suffix"
+pio run -e "$faketec" -t create_uf2
 cp ".pio/build/$faketec/firmware.uf2" "$build_dir/dist/faketec-v4-repeater-$profile_suffix.uf2"
 cd "$build_dir/dist"
 shasum -a 256 ./*.bin ./*.uf2 > SHA256SUMS
