@@ -2,12 +2,13 @@
 
 Прошивки стационарных LoRa-репитеров на базе MeshCore 1.18.0. Скачивание начинается по ссылкам в таблице. [Все выпуски](https://github.com/serggend/meshcore-builds/releases)
 
-| Плата | Репитер с консолью · v0.1.0-preview.1 | Репитер с BLE Companion · v0.2.0-preview.2 |
+| Плата | Репитер с консолью | Репитер с BLE Companion |
 | --- | --- | --- |
+| **Heltec WiFi LoRa 32 V3 OLED** | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.3.0-preview.1/heltec-v3-oled-repeater-connect-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.3.0-preview.1/heltec-v3-oled-repeater-connect-app.bin) | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.3.0-preview.1/heltec-v3-oled-repeater-companion-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.3.0-preview.1/heltec-v3-oled-repeater-companion-app.bin) |
 | **Heltec WiFi LoRa 32 V4 OLED** | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/heltec-v4-oled-repeater-connect-app.bin) | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/heltec-v4-oled-repeater-companion-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/heltec-v4-oled-repeater-companion-app.bin) |
 | **FakeTec V4 · ProMicro nRF52840 + HT-RA62** | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/faketec-v4-repeater-connect.uf2) | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/faketec-v4-repeater-companion.uf2) |
 
-Контрольные суммы SHA-256 для сборок. [репитер с консолью](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [репитер с Companion](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/SHA256SUMS). [Инструкция по установке](#установка-и-откат)
+Контрольные суммы SHA-256 для сборок. [Heltec V3](https://github.com/serggend/meshcore-builds/releases/download/v0.3.0-preview.1/SHA256SUMS) · [V4 и FakeTec с консолью](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [V4 и FakeTec с Companion](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/SHA256SUMS). [Инструкция по установке](#установка-и-откат)
 
 ### Какую сборку выбрать
 
@@ -21,6 +22,26 @@
 ## Установка и откат
 
 Скачай файл и контрольные суммы из одного столбца. Сверь SHA-256 нужного файла командой `shasum -a 256 ИМЯ_ФАЙЛА` со строкой в `SHA256SUMS`.
+
+### Heltec V3 OLED
+
+Для Heltec WiFi LoRa 32 V3 с ESP32-S3, SX1262 и флешем 8 МиБ скачай файл из строки V3. Подключи плату по USB. Если запись не начинается, зажми PRG, нажми и отпусти RST, затем отпусти PRG. В Windows порт видно в диспетчере устройств, а для USB-UART используется драйвер CP210x. [Подключение и режим загрузки Heltec](https://docs.heltec.org/en/node/esp32/esp32_general_docs/quick_start.html)
+
+- Для первой установки запиши `-merged.bin` по адресу `0x0`.
+- Для обновления сохрани резервную копию флеша. При совпадающей таблице разделов и активном штатном слоте `app0` запиши `-app.bin` по адресу `0x10000` без полного стирания. Эта запись оставляет NVS и SPIFFS с настройками и ключами.
+
+Пример для Windows с esptool 4.x и профилем BLE Companion. Подставь COM-порт платы вместо `COM5`.
+
+```powershell
+# Резервная копия 8 МиБ
+py -m esptool --chip esp32s3 --port COM5 read_flash 0x0 0x800000 heltec-v3-backup.bin
+
+# Первая установка
+py -m esptool --chip esp32s3 --port COM5 write_flash 0x0 heltec-v3-oled-repeater-companion-merged.bin
+
+# Обновление приложения в штатном активном слоте app0
+py -m esptool --chip esp32s3 --port COM5 write_flash 0x10000 heltec-v3-oled-repeater-companion-app.bin
+```
 
 ### Heltec V4 OLED
 
@@ -62,8 +83,8 @@ esptool.py --chip esp32s3 --port PORT write_flash 0x0 heltec-backup.bin
 
 Открой USB-терминал на 115200 бод с отправкой конца строки. Проверь `get role`, `get repeat` и `get radio`. Для администрирования через LoRa на новой плате задай пароль командой `password <пароль>`. Заводской пароль `password` отключается при запуске. Сверь частоту и параметры с радиопрофилем своей сети.
 
-- **Wi-Fi на Heltec.** Введи `wifi set <IPv4 компьютера с MeshDash>|<SSID>|<пароль Wi-Fi>`. Команда `wifi status` покажет адрес репитера. Выбери TCP-транспорт репитера в MeshDash и порт `5001`. TCP работает в доверенной локальной сети без шифрования и принимает соединение от указанного IPv4. `wifi off` отключает Wi-Fi и удаляет сохранённые параметры.
-- **BLE на обеих платах.** Введи `ble set <шесть цифр>`, затем `reboot`. Для консольной сборки в BLE-терминале выбери устройство `Repeater-…` и сервис Nordic UART. Включи уведомления TX и для проверки отправь `get role` с концом строки. `ble off` выключает BLE. Для изменения PIN достаточно USB, экран для настройки не требуется.
+- **Wi-Fi на Heltec V3 и V4.** Введи `wifi set <IPv4 компьютера с MeshDash>|<SSID>|<пароль Wi-Fi>`. Команда `wifi status` покажет адрес репитера. Выбери TCP-транспорт репитера в MeshDash и порт `5001`. TCP работает в доверенной локальной сети без шифрования и принимает соединение от указанного IPv4. `wifi off` отключает Wi-Fi и удаляет сохранённые параметры.
+- **BLE.** Введи `ble set <шесть цифр>`, затем `reboot`. Для консольной сборки в BLE-терминале выбери устройство `Repeater-…` и сервис Nordic UART. Включи уведомления TX и для проверки отправь `get role` с концом строки. `ble off` выключает BLE. Для изменения PIN достаточно USB, экран для настройки не требуется.
 
 ## Сборка из исходников
 
