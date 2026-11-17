@@ -1,6 +1,6 @@
 # Сборки MeshCore
 
-Прошивки стационарных LoRa-репитеров на базе MeshCore 1.18.0. Скачивание начинается по ссылкам в таблице. [Все выпуски](https://github.com/serggend/meshcore-builds/releases)
+Прошивки LoRa-репитеров и Companion на базе MeshCore 1.18.0. [Все выпуски](https://github.com/serggend/meshcore-builds/releases)
 
 | Плата | Репитер с консолью | Репитер с BLE Companion |
 | --- | --- | --- |
@@ -9,6 +9,16 @@
 | **FakeTec V4 · ProMicro nRF52840 + HT-RA62** | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/faketec-v4-repeater-connect.uf2) | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/faketec-v4-repeater-companion.uf2) |
 
 Контрольные суммы SHA-256 для сборок. [Heltec V3](https://github.com/serggend/meshcore-builds/releases/download/v0.3.0-preview.1/SHA256SUMS) · [V4 и FakeTec с консолью](https://github.com/serggend/meshcore-builds/releases/download/v0.1.0-preview.1/SHA256SUMS) · [V4 и FakeTec с Companion](https://github.com/serggend/meshcore-builds/releases/download/v0.2.0-preview.2/SHA256SUMS). [Инструкция по установке](#установка-и-откат)
+
+### Companion для Heltec V4 OLED
+
+Предварительная сборка `v1.18.0-echo.1` для клиентской ноды с BLE, USB и Wi-Fi. Длинные эхо канальных сообщений передаются в журнал приёма с маршрутом и началом шифротекста. MeshConnect с включённым восстановлением длинных эхов сопоставляет их со своими отправками. Приложения без такой поддержки требуют собственной обработки укороченного кадра. [Описание выпуска](https://github.com/serggend/meshcore-builds/releases/tag/v0.4.0-preview.1)
+
+- [Обновление BIN для штатного app0](https://github.com/serggend/meshcore-builds/releases/download/v0.4.0-preview.1/heltec-v4-oled-companion-echo-app.bin)
+- [Объединённый BIN для первой установки](https://github.com/serggend/meshcore-builds/releases/download/v0.4.0-preview.1/heltec-v4-oled-companion-echo-merged.bin)
+- [SHA256SUMS](https://github.com/serggend/meshcore-builds/releases/download/v0.4.0-preview.1/SHA256SUMS)
+
+Для обновления сначала сохрани полный дамп флеша и сверь разделы по инструкции для Heltec V4 OLED ниже. В команде записи подставь имя Companion-файла из этого выпуска.
 
 ### Какую сборку выбрать
 
@@ -96,7 +106,10 @@ python3 -m venv .venv
 python -m pip install platformio==6.2.0
 ./scripts/build.sh repeater
 ./scripts/build.sh companion
+./scripts/build.sh client
 ```
+
+Профиль `client` применяет [профиль Heltec V4 BLE/USB/Wi-Fi](patches/heltec-v4-companion-all.patch) и [исправление журнала приёма](patches/companion-rx-log.patch), затем кладёт файлы в `dist/client/`.
 
 Нужны Git, curl и компилятор C++ с ASan и UBSan. [Сборки GitHub Actions](https://github.com/serggend/meshcore-builds/actions)
 

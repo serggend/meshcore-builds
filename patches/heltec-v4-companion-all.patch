@@ -1,0 +1,37 @@
+diff --git a/variants/heltec_v4/platformio.ini b/variants/heltec_v4/platformio.ini
+index 76e8e71..656675c 100644
+--- a/variants/heltec_v4/platformio.ini
++++ b/variants/heltec_v4/platformio.ini
+@@ -447,3 +447,32 @@ build_flags =
+   -DARDUINO_USB_MODE=1
+ build_src_filter = ${Heltec_lora32_v4.build_src_filter}
+   +<../examples/kiss_modem/>
++
++[env:heltec_v4_companion_radio_all]
++extends = heltec_v4_oled
++build_flags =
++  ${heltec_v4_oled.build_flags}
++  -I examples/companion_radio/ui-new
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D DISPLAY_CLASS=SSD1306Display
++  -D BLE_PIN_CODE=123456   ; dynamic, random PIN
++  -D AUTO_SHUTDOWN_MILLIVOLTS=3400
++  -D OFFLINE_QUEUE_SIZE=256
++  -D ENABLE_WIFI_INTERFACE
++  -D ENABLE_USB_INTERFACE
++  -D WIFI_SSID='""'
++  -D WIFI_PWD='""'
++  -D FIRMWARE_VERSION='"v1.18.0-echo.1"'
++;  -D MESH_PACKET_LOGGING=1
++;  -D MESH_DEBUG=1
++build_src_filter = ${heltec_v4_oled.build_src_filter}
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++  +<helpers/esp32/*.cpp>
++  +<helpers/wifi/*.cpp>
++  +<../examples/companion_radio/*.cpp>
++  +<../examples/companion_radio/ui-new/*.cpp>
++lib_deps =
++  ${heltec_v4_oled.lib_deps}
++  densaugeo/base64 @ ~1.4.0

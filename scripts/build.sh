@@ -5,7 +5,8 @@ profile=${1:-repeater}
 case "$profile" in
   repeater) profile_suffix=connect ;;
   companion) profile_suffix=companion ;;
-  *) echo 'Использование: ./scripts/build.sh [repeater|companion]' >&2; exit 2 ;;
+  client) ;;
+  *) echo 'Использование: ./scripts/build.sh [repeater|companion|client]' >&2; exit 2 ;;
 esac
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -17,6 +18,25 @@ mkdir -p "$build_dir/source" "$build_dir/dist"
 curl -fLSs --retry 3 "https://codeload.github.com/meshcore-dev/MeshCore/tar.gz/$revision" -o "$build_dir/meshcore.tar.gz"
 tar -xzf "$build_dir/meshcore.tar.gz" -C "$build_dir/source" --strip-components=1
 cd "$build_dir/source"
+
+if [ "$profile" = client ]; then
+  git apply --check "$repo_dir/patches/heltec-v4-companion-all.patch" "$repo_dir/patches/companion-rx-log.patch"
+  git apply "$repo_dir/patches/heltec-v4-companion-all.patch" "$repo_dir/patches/companion-rx-log.patch"
+  cp "$repo_dir/platformio.releases.ini" platformio.local.ini
+  unset PLATFORMIO_BUILD_FLAGS
+
+  env_name=heltec_v4_companion_radio_all
+  artifact=heltec-v4-oled-companion-echo
+  pio run -e "$env_name" -t mergebin
+  cp ".pio/build/$env_name/firmware-merged.bin" "$build_dir/dist/$artifact-merged.bin"
+  cp ".pio/build/$env_name/firmware.bin" "$build_dir/dist/$artifact-app.bin"
+  cd "$build_dir/dist"
+  shasum -a 256 ./*.bin > SHA256SUMS
+  mkdir -p "$repo_dir/dist/$profile"
+  cp ./*.bin SHA256SUMS "$repo_dir/dist/$profile/"
+  exit 0
+fi
+
 git apply --check "$repo_dir/patches/repeater-connect.patch"
 git apply "$repo_dir/patches/repeater-connect.patch"
 if [ "$profile" = companion ]; then

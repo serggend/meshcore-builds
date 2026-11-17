@@ -1,0 +1,36 @@
+--- a/examples/companion_radio/MyMesh.cpp
++++ b/examples/companion_radio/MyMesh.cpp
+@@ -289,16 +289,25 @@
+ }
+ 
+ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+-  if (_serial->isConnected() && len + 3 <= MAX_FRAME_SIZE) {
+-    int i = 0;
+-    out_frame[i++] = PUSH_CODE_LOG_RX_DATA;
+-    out_frame[i++] = (int8_t)(snr * 4);
+-    out_frame[i++] = (int8_t)(rssi);
+-    memcpy(&out_frame[i], raw, len);
+-    i += len;
++  if (!_serial->isConnected()) return;
+ 
+-    _serial->writeFrame(out_frame, i);
++  const int max_raw_len = MAX_FRAME_SIZE - 3;
++  if (len > max_raw_len) {
++    const uint8_t route = raw[0] & PH_ROUTE_MASK;
++    const uint8_t type = (raw[0] >> PH_TYPE_SHIFT) & PH_TYPE_MASK;
++    if ((route != ROUTE_TYPE_FLOOD && route != ROUTE_TYPE_TRANSPORT_FLOOD)
++        || (type != PAYLOAD_TYPE_GRP_TXT && type != PAYLOAD_TYPE_GRP_DATA)) return;
++
++    // Echo-aware clients can match a prefix to their own channel packet.
++    // Keep the route and encrypted prefix in the existing RX-log frame.
++    len = max_raw_len;
+   }
++
++  out_frame[0] = PUSH_CODE_LOG_RX_DATA;
++  out_frame[1] = (int8_t)(snr * 4);
++  out_frame[2] = (int8_t)(rssi);
++  memcpy(&out_frame[3], raw, len);
++  _serial->writeFrame(out_frame, len + 3);
+ }
+ 
+ bool MyMesh::isAutoAddEnabled() const {
