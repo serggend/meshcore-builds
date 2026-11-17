@@ -5,8 +5,8 @@ profile=${1:-repeater}
 case "$profile" in
   repeater) profile_suffix=connect ;;
   companion) profile_suffix=companion ;;
-  client) ;;
-  *) echo 'Использование: ./scripts/build.sh [repeater|companion|client]' >&2; exit 2 ;;
+  client|client-ble) ;;
+  *) echo 'Использование: ./scripts/build.sh [repeater|companion|client|client-ble]' >&2; exit 2 ;;
 esac
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -34,6 +34,29 @@ if [ "$profile" = client ]; then
   shasum -a 256 ./*.bin > SHA256SUMS
   mkdir -p "$repo_dir/dist/$profile"
   cp ./*.bin SHA256SUMS "$repo_dir/dist/$profile/"
+  exit 0
+fi
+
+if [ "$profile" = client-ble ]; then
+  git apply --check "$repo_dir/patches/companion-rx-log.patch" "$repo_dir/patches/rak4631-open-bme680.patch"
+  git apply "$repo_dir/patches/companion-rx-log.patch" "$repo_dir/patches/rak4631-open-bme680.patch"
+  cp "$repo_dir/platformio.releases.ini" platformio.local.ini
+  unset PLATFORMIO_BUILD_FLAGS UF2_FILE_PATH
+
+  pio run -e Heltec_v3_companion_radio_ble -t mergebin
+  cp .pio/build/Heltec_v3_companion_radio_ble/firmware.bin "$build_dir/dist/heltec-v3-oled-companion-echo-app.bin"
+  cp .pio/build/Heltec_v3_companion_radio_ble/firmware-merged.bin "$build_dir/dist/heltec-v3-oled-companion-echo-merged.bin"
+
+  pio run -e ProMicro_companion_radio_ble -t create_uf2
+  cp .pio/build/ProMicro_companion_radio_ble/firmware.uf2 "$build_dir/dist/faketec-v4-promicro-companion-echo.uf2"
+
+  pio run -e RAK_4631_companion_radio_ble -t create_uf2
+  cp .pio/build/RAK_4631_companion_radio_ble/firmware.uf2 "$build_dir/dist/rak4631-companion-echo.uf2"
+
+  cd "$build_dir/dist"
+  shasum -a 256 ./*.bin ./*.uf2 > SHA256SUMS
+  mkdir -p "$repo_dir/dist/$profile"
+  cp ./*.bin ./*.uf2 SHA256SUMS "$repo_dir/dist/$profile/"
   exit 0
 fi
 

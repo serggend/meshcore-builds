@@ -20,6 +20,18 @@
 
 Для обновления сначала сохрани полный дамп флеша и сверь разделы по инструкции для Heltec V4 OLED ниже. В команде записи подставь имя Companion-файла из этого выпуска.
 
+### BLE Companion для Heltec V3 OLED, FakeTec V4 и RAK4631
+
+Тот же патч длинного эха на базе штатных профилей MeshCore 1.18.0. Проверены сборка и формат файлов. Эфирный тест для этой версии патча проведён на Heltec V4.3 OLED. [Выпуск и контрольные суммы](https://github.com/serggend/meshcore-builds/releases/tag/v0.4.0-preview.2)
+
+| Плата | Файлы | Установка |
+| --- | --- | --- |
+| **Heltec WiFi LoRa 32 V3 OLED** | [Первая установка BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.4.0-preview.2/heltec-v3-oled-companion-echo-merged.bin) · [Обновление BIN](https://github.com/serggend/meshcore-builds/releases/download/v0.4.0-preview.2/heltec-v3-oled-companion-echo-app.bin) | Объединённый образ по адресу `0x0`. Для обновления предыдущего Companion сделай резервную копию и проверь таблицу разделов. При активном `app0` запиши файл обновления по адресу `0x10000`. |
+| **FakeTec V4 на ProMicro nRF52840 + HT-RA62** | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.4.0-preview.2/faketec-v4-promicro-companion-echo.uf2) | Скопируй файл на диск совместимого UF2-загрузчика. |
+| **RAK4631 WisBlock** | [Скачать UF2](https://github.com/serggend/meshcore-builds/releases/download/v0.4.0-preview.2/rak4631-companion-echo.uf2) | Скопируй файл на диск совместимого UF2-загрузчика. |
+
+В сборке RAK4631 датчик BME680 работает через библиотеку Adafruit. Она передаёт температуру, влажность, давление и сопротивление газа. Индекс качества воздуха Bosch BSEC в этой сборке недоступен.
+
 ### Какую сборку выбрать
 
 | Профиль | Возможности | Что учесть |
@@ -107,9 +119,12 @@ python -m pip install platformio==6.2.0
 ./scripts/build.sh repeater
 ./scripts/build.sh companion
 ./scripts/build.sh client
+./scripts/build.sh client-ble
 ```
 
 Профиль `client` применяет [профиль Heltec V4 BLE/USB/Wi-Fi](patches/heltec-v4-companion-all.patch) и [исправление журнала приёма](patches/companion-rx-log.patch), затем кладёт файлы в `dist/client/`.
+
+Профиль `client-ble` собирает три BLE Companion из таблицы выше в `dist/client-ble/` с тем же исправлением журнала приёма.
 
 Нужны Git, curl и компилятор C++ с ASan и UBSan. [Сборки GitHub Actions](https://github.com/serggend/meshcore-builds/actions)
 
