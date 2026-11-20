@@ -1,0 +1,251 @@
+diff --git a/examples/companion_radio/MyMesh.cpp b/examples/companion_radio/MyMesh.cpp
+index 0cbb0eb..ddff620 100644
+--- a/examples/companion_radio/MyMesh.cpp
++++ b/examples/companion_radio/MyMesh.cpp
+@@ -70,6 +70,7 @@
+ // Stats sub-types for CMD_GET_STATS
+ #define STATS_TYPE_CORE               0
+ #define STATS_TYPE_RADIO              1
++#define STATS_TYPE_RADIO_NOISE_HISTORY 0x80
+ #define STATS_TYPE_PACKETS             2
+ 
+ #define RESP_CODE_OK                  0
+@@ -1449,6 +1450,12 @@ void MyMesh::handleCmdFrame(size_t len) {
+       writeErrFrame(ERR_CODE_ILLEGAL_ARG);
+     } else if (freq >= 150000 && freq <= 2500000 && sf >= 5 && sf <= 12 && cr >= 5 && cr <= 8 && bw >= 7000 &&
+         bw <= 500000) {
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++      if (_prefs.freq != (float)freq / 1000.0 || _prefs.bw != (float)bw / 1000.0 ||
++          _prefs.sf != sf || _prefs.cr != cr) {
++        _radio_noise.reset(_ms->getMillis());
++      }
++#endif
+       _prefs.sf = sf;
+       _prefs.cr = cr;
+       _prefs.freq = (float)freq / 1000.0;
+@@ -1948,7 +1955,42 @@ void MyMesh::handleCmdFrame(size_t len) {
+       out_frame[i++] = last_snr;
+       memcpy(&out_frame[i], &tx_air_secs, 4); i += 4;
+       memcpy(&out_frame[i], &rx_air_secs, 4); i += 4;
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++      const uint32_t latest = _radio_noise.latest();
++      const auto* window = _radio_noise.get(latest);
++      out_frame[i++] = 'R';
++      out_frame[i++] = 'H';
++      out_frame[i++] = 1;
++      out_frame[i++] = window ? window->valid : 0;
++      out_frame[i++] = window ? window->elevated : 0;
++      const uint32_t age_secs = latest ? _radio_noise.ageMs(latest, _ms->getMillis()) / 1000 : 255;
++      out_frame[i++] = age_secs < 255 ? age_secs : 255;
++#endif
+       _serial->writeFrame(out_frame, i);
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++    } else if (stats_type == STATS_TYPE_RADIO_NOISE_HISTORY && len == 6) {
++      uint32_t cursor;
++      memcpy(&cursor, &cmd_frame[2], 4);
++      const uint32_t latest = _radio_noise.latest();
++      if (!cursor || cursor > latest) cursor = latest;
++      if (cursor < _radio_noise.oldest()) cursor = 0;
++      int i = 0;
++      out_frame[i++] = RESP_CODE_STATS;
++      out_frame[i++] = STATS_TYPE_RADIO_NOISE_HISTORY;
++      memcpy(&out_frame[i], &cursor, 4); i += 4;
++      const uint16_t age_secs = cursor ? _radio_noise.ageMs(cursor, _ms->getMillis()) / 1000 : 0;
++      memcpy(&out_frame[i], &age_secs, 2); i += 2;
++      // Newest to oldest, with room below MAX_FRAME_SIZE.
++      for (int count = 0; count < 24 && cursor; ++count, --cursor) {
++        const auto* window = _radio_noise.get(cursor);
++        if (!window) break;
++        memcpy(&out_frame[i], &window->floor, 2); i += 2;
++        memcpy(&out_frame[i], &window->peak, 2); i += 2;
++        out_frame[i++] = window->valid;
++        out_frame[i++] = window->elevated;
++      }
++      _serial->writeFrame(out_frame, i);
++#endif
+     } else if (stats_type == STATS_TYPE_PACKETS) {
+       int i = 0;
+       out_frame[i++] = RESP_CODE_STATS;
+@@ -2423,6 +2465,14 @@ void MyMesh::checkSerialInterface() {
+ 
+ void MyMesh::loop() {
+   BaseChatMesh::loop();
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++  if (_radio_noise.shouldSample(_ms->getMillis())) {
++    int16_t dbm;
++    if (radio_driver.sampleIdleRssi(dbm)) {
++      _radio_noise.sample(dbm, radio_driver.getNoiseFloor());
++    }
++  }
++#endif
+ 
+   if (_cli_rescue) {
+     checkCLIRescueCmd();
+diff --git a/examples/companion_radio/MyMesh.h b/examples/companion_radio/MyMesh.h
+index 994ca3f..0743637 100644
+--- a/examples/companion_radio/MyMesh.h
++++ b/examples/companion_radio/MyMesh.h
+@@ -23,6 +23,9 @@
+ #endif
+ 
+ #include "DataStore.h"
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++#include "RadioNoiseHistory.h"
++#endif
+ #include "NodePrefs.h"
+ 
+ #include <RTClib.h>
+@@ -88,6 +91,9 @@ struct AdvertPath {
+ };
+ 
+ class MyMesh : public BaseChatMesh, public DataStoreHost {
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++  RadioNoiseHistory _radio_noise;
++#endif
+ public:
+   class Listener {
+     public:
+diff --git a/examples/companion_radio/RadioNoiseHistory.h b/examples/companion_radio/RadioNoiseHistory.h
+new file mode 100644
+index 0000000..a5b3a63
+--- /dev/null
++++ b/examples/companion_radio/RadioNoiseHistory.h
+@@ -0,0 +1,89 @@
++#pragma once
++#include <stdint.h>
++
++// Local diagnostics only. No changes to receive, transmit, or CAD policy.
++class RadioNoiseHistory {
++public:
++  static constexpr uint16_t Capacity = 360;
++  static constexpr uint32_t WindowMs = 10000;
++  static constexpr uint32_t SampleMs = 200;
++  struct Window {
++    int16_t floor = 0;
++    int16_t peak = 0;
++    uint8_t elevated = 0;
++    uint8_t valid = 0;
++  };
++
++  void reset(uint32_t now) {
++    _ready = true;
++    _start = now;
++    _sampleAt = now - SampleMs;
++    _current = Window();
++    _size = 0;
++    _next = 0;
++    ++_sequence;
++  }
++
++  bool shouldSample(uint32_t now) {
++    if (!_ready) reset(now);
++    advance(now);
++    if (now - _sampleAt < SampleMs) return false;
++    _sampleAt = now;
++    return true;
++  }
++
++  void sample(int16_t rssi, int16_t floor) {
++    if (floor >= 0 || rssi >= 0 || _current.valid == 255) return;
++    if (_current.valid == 0) {
++      _current.floor = floor;
++      _current.peak = rssi;
++    } else if (rssi > _current.peak) {
++      _current.peak = rssi;
++    }
++    ++_current.valid;
++    if (rssi >= _current.floor + 10) ++_current.elevated;
++  }
++
++  uint32_t latest() const { return _size ? _sequence : 0; }
++  uint32_t oldest() const { return _size ? _sequence - _size + 1 : 0; }
++
++  uint32_t ageMs(uint32_t sequence, uint32_t now) const {
++    return now - _start + (_sequence - sequence) * WindowMs;
++  }
++
++  const Window* get(uint32_t sequence) const {
++    if (!_size || sequence < oldest() || sequence > _sequence) return nullptr;
++    return &_windows[(_next + Capacity - 1 - (_sequence - sequence)) % Capacity];
++  }
++
++private:
++  Window _windows[Capacity];
++  Window _current;
++  uint32_t _sequence = 0;
++  uint32_t _start = 0;
++  uint32_t _sampleAt = 0;
++  uint16_t _next = 0;
++  uint16_t _size = 0;
++  bool _ready = false;
++
++  void push(const Window& window) {
++    _windows[_next] = window;
++    _next = (_next + 1) % Capacity;
++    if (_size < Capacity) ++_size;
++    ++_sequence;
++  }
++
++  void advance(uint32_t now) {
++    uint32_t elapsed = (now - _start) / WindowMs;
++    if (!elapsed) return;
++    _start += elapsed * WindowMs;
++    push(_current);
++    _current = Window();
++    --elapsed;
++    if (elapsed > Capacity) {
++      _sequence += elapsed - Capacity;
++      elapsed = Capacity;
++    }
++    while (elapsed-- > 0) push(_current);
++  }
++};
+diff --git a/src/helpers/radiolib/RadioLibWrappers.cpp b/src/helpers/radiolib/RadioLibWrappers.cpp
+index e4d2ba1..14dbe6e 100644
+--- a/src/helpers/radiolib/RadioLibWrappers.cpp
++++ b/src/helpers/radiolib/RadioLibWrappers.cpp
+@@ -109,6 +109,16 @@ void RadioLibWrapper::loop() {
+   }
+ }
+ 
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++bool RadioLibWrapper::sampleIdleRssi(int16_t& dbm) {
++  if (state != STATE_RX || isReceivingPacket()) return false;
++  const auto rssi = getCurrentRSSI();
++  if (state != STATE_RX || !(rssi >= -160.0f && rssi < 0.0f)) return false;
++  dbm = static_cast<int16_t>(rssi);
++  return true;
++}
++#endif
++
+ void RadioLibWrapper::startRecv() {
+   #if defined(USE_LR2021)
+   _radio->standby(); // without this LR2021 can throw -706 when calling startReceive after hardware CAD when side detectors are enabled
+diff --git a/src/helpers/radiolib/RadioLibWrappers.h b/src/helpers/radiolib/RadioLibWrappers.h
+index 77dd931..3a1402c 100644
+--- a/src/helpers/radiolib/RadioLibWrappers.h
++++ b/src/helpers/radiolib/RadioLibWrappers.h
+@@ -51,6 +51,9 @@ public:
+   uint32_t getRngSeed();
+   void setTxPower(int8_t dbm);
+ 
++#ifdef ENABLE_COMPANION_RADIO_NOISE
++  bool sampleIdleRssi(int16_t& dbm);
++#endif
+   virtual float getCurrentRSSI() =0;
+   virtual uint8_t getSpreadingFactor() const { return LORA_SF; }
+   static uint16_t preambleLengthForSF(uint8_t sf) { return sf <= 8 ? 32 : 16; }
+diff --git a/variants/heltec_v4/platformio.ini b/variants/heltec_v4/platformio.ini
+index 656675c..aec2624 100644
+--- a/variants/heltec_v4/platformio.ini
++++ b/variants/heltec_v4/platformio.ini
+@@ -463,7 +463,8 @@ build_flags =
+   -D ENABLE_USB_INTERFACE
+   -D WIFI_SSID='""'
+   -D WIFI_PWD='""'
+-  -D FIRMWARE_VERSION='"v1.18.0-echo.1"'
++  -D ENABLE_COMPANION_RADIO_NOISE
++  -D FIRMWARE_VERSION='"v1.18.0-radio.1"'
+ ;  -D MESH_PACKET_LOGGING=1
+ ;  -D MESH_DEBUG=1
+ build_src_filter = ${heltec_v4_oled.build_src_filter}

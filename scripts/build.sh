@@ -5,8 +5,8 @@ profile=${1:-repeater}
 case "$profile" in
   repeater) profile_suffix=connect ;;
   companion) profile_suffix=companion ;;
-  client|client-ble) ;;
-  *) echo 'Использование: ./scripts/build.sh [repeater|companion|client|client-ble]' >&2; exit 2 ;;
+  client|client-ble|client-radio) ;;
+  *) echo 'Использование: ./scripts/build.sh [repeater|companion|client|client-ble|client-radio]' >&2; exit 2 ;;
 esac
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -19,7 +19,7 @@ curl -fLSs --retry 3 "https://codeload.github.com/meshcore-dev/MeshCore/tar.gz/$
 tar -xzf "$build_dir/meshcore.tar.gz" -C "$build_dir/source" --strip-components=1
 cd "$build_dir/source"
 
-if [ "$profile" = client ]; then
+if [ "$profile" = client ] || [ "$profile" = client-radio ]; then
   git apply --check "$repo_dir/patches/heltec-v4-companion-all.patch" "$repo_dir/patches/companion-rx-log.patch"
   git apply "$repo_dir/patches/heltec-v4-companion-all.patch" "$repo_dir/patches/companion-rx-log.patch"
   cp "$repo_dir/platformio.releases.ini" platformio.local.ini
@@ -27,6 +27,15 @@ if [ "$profile" = client ]; then
 
   env_name=heltec_v4_companion_radio_all
   artifact=heltec-v4-oled-companion-echo
+  if [ "$profile" = client-radio ]; then
+    git apply --check "$repo_dir/patches/companion-radio-history.patch"
+    git apply "$repo_dir/patches/companion-radio-history.patch"
+    c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+      -I examples/companion_radio "$repo_dir/tests/companion_radio_noise_history.cpp" \
+      -o "$build_dir/radio-noise-history-test"
+    "$build_dir/radio-noise-history-test"
+    artifact=heltec-v4-companion-radio-history
+  fi
   pio run -e "$env_name" -t mergebin
   cp ".pio/build/$env_name/firmware-merged.bin" "$build_dir/dist/$artifact-merged.bin"
   cp ".pio/build/$env_name/firmware.bin" "$build_dir/dist/$artifact-app.bin"

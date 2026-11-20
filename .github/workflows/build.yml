@@ -3,9 +3,9 @@ name: Сборка прошивок
 on:
   push:
     branches: [main]
-    paths: ['patches/**', 'scripts/**', 'platformio.releases.ini', '.github/workflows/build.yml']
+    paths: ['patches/**', 'scripts/**', 'tests/**', 'platformio.releases.ini', '.github/workflows/build.yml']
   pull_request:
-    paths: ['patches/**', 'scripts/**', 'platformio.releases.ini', '.github/workflows/build.yml']
+    paths: ['patches/**', 'scripts/**', 'tests/**', 'platformio.releases.ini', '.github/workflows/build.yml']
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [repeater, companion, client, client-ble]
+        profile: [repeater, companion, client, client-ble, client-radio]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:

@@ -20,6 +20,16 @@
 
 Для обновления сначала сохрани полный дамп флеша и сверь разделы по инструкции для Heltec V4 OLED ниже. В команде записи подставь имя Companion-файла из этого выпуска.
 
+### История эфира для мобильной Heltec V4 OLED
+
+Прошивка `v1.18.0-radio.1` для Heltec V4 OLED Companion с BLE, USB и Wi-Fi. Нода хранит до часа десятисекундных сводок уровня сигнала в RAM, пока слушает эфир. MeshConnect 0.1.79 показывает историю и использует свежие сводки для красной индикации устойчивых помех. После перезапуска ноды история собирается заново. [Описание выпуска](https://github.com/serggend/meshcore-builds/releases/tag/v0.5.0-preview.1) · [MeshConnect 0.1.79](https://github.com/serggend/MeshConnect/releases/tag/v0.1.79-build79)
+
+- [Обновление для штатного app0](https://github.com/serggend/meshcore-builds/releases/download/v0.5.0-preview.1/heltec-v4-companion-radio-history-app.bin)
+- [Полный образ для первой установки](https://github.com/serggend/meshcore-builds/releases/download/v0.5.0-preview.1/heltec-v4-companion-radio-history-merged.bin)
+- [Контрольные суммы](https://github.com/serggend/meshcore-builds/releases/download/v0.5.0-preview.1/SHA256SUMS)
+
+При обновлении проверь разметку разделов и сохрани резервную копию по инструкции для Heltec V4 OLED ниже.
+
 ### BLE Companion для Heltec V3 OLED, FakeTec V4 и RAK4631
 
 Тот же патч длинного эха на базе штатных профилей MeshCore 1.18.0. Проверены сборка и формат файлов. Эфирный тест для этой версии патча проведён на Heltec V4.3 OLED. [Выпуск и контрольные суммы](https://github.com/serggend/meshcore-builds/releases/tag/v0.4.0-preview.2)
@@ -120,11 +130,14 @@ python -m pip install platformio==6.2.0
 ./scripts/build.sh companion
 ./scripts/build.sh client
 ./scripts/build.sh client-ble
+./scripts/build.sh client-radio
 ```
 
 Профиль `client` применяет [профиль Heltec V4 BLE/USB/Wi-Fi](patches/heltec-v4-companion-all.patch) и [исправление журнала приёма](patches/companion-rx-log.patch), затем кладёт файлы в `dist/client/`.
 
 Профиль `client-ble` собирает три BLE Companion из таблицы выше в `dist/client-ble/` с тем же исправлением журнала приёма.
+
+Профиль `client-radio` добавляет к `client` [патч истории эфира](patches/companion-radio-history.patch) и проверяет буфер сводок с ASan и UBSan. Результат сохраняется в `dist/client-radio/`.
 
 Нужны Git, curl и компилятор C++ с ASan и UBSan. [Сборки GitHub Actions](https://github.com/serggend/meshcore-builds/actions)
 
