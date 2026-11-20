@@ -5,8 +5,8 @@ profile=${1:-repeater}
 case "$profile" in
   repeater) profile_suffix=connect ;;
   companion) profile_suffix=companion ;;
-  client|client-ble|client-radio) ;;
-  *) echo 'Использование: ./scripts/build.sh [repeater|companion|client|client-ble|client-radio]' >&2; exit 2 ;;
+  client|client-ble|client-radio|client-radio-nrf) ;;
+  *) echo 'Использование: ./scripts/build.sh [repeater|companion|client|client-ble|client-radio|client-radio-nrf]' >&2; exit 2 ;;
 esac
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -19,6 +19,13 @@ curl -fLSs --retry 3 "https://codeload.github.com/meshcore-dev/MeshCore/tar.gz/$
 tar -xzf "$build_dir/meshcore.tar.gz" -C "$build_dir/source" --strip-components=1
 cd "$build_dir/source"
 
+test_radio_history() {
+  c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -I examples/companion_radio "$repo_dir/tests/companion_radio_noise_history.cpp" \
+    -o "$build_dir/radio-noise-history-test"
+  "$build_dir/radio-noise-history-test"
+}
+
 if [ "$profile" = client ] || [ "$profile" = client-radio ]; then
   git apply --check "$repo_dir/patches/heltec-v4-companion-all.patch" "$repo_dir/patches/companion-rx-log.patch"
   git apply "$repo_dir/patches/heltec-v4-companion-all.patch" "$repo_dir/patches/companion-rx-log.patch"
@@ -30,10 +37,7 @@ if [ "$profile" = client ] || [ "$profile" = client-radio ]; then
   if [ "$profile" = client-radio ]; then
     git apply --check "$repo_dir/patches/companion-radio-history.patch"
     git apply "$repo_dir/patches/companion-radio-history.patch"
-    c++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-      -I examples/companion_radio "$repo_dir/tests/companion_radio_noise_history.cpp" \
-      -o "$build_dir/radio-noise-history-test"
-    "$build_dir/radio-noise-history-test"
+    test_radio_history
     artifact=heltec-v4-companion-radio-history
   fi
   pio run -e "$env_name" -t mergebin
@@ -46,26 +50,36 @@ if [ "$profile" = client ] || [ "$profile" = client-radio ]; then
   exit 0
 fi
 
-if [ "$profile" = client-ble ]; then
+if [ "$profile" = client-ble ] || [ "$profile" = client-radio-nrf ]; then
   git apply --check "$repo_dir/patches/companion-rx-log.patch" "$repo_dir/patches/rak4631-open-bme680.patch"
   git apply "$repo_dir/patches/companion-rx-log.patch" "$repo_dir/patches/rak4631-open-bme680.patch"
   cp "$repo_dir/platformio.releases.ini" platformio.local.ini
   unset PLATFORMIO_BUILD_FLAGS UF2_FILE_PATH
 
-  pio run -e Heltec_v3_companion_radio_ble -t mergebin
-  cp .pio/build/Heltec_v3_companion_radio_ble/firmware.bin "$build_dir/dist/heltec-v3-oled-companion-echo-app.bin"
-  cp .pio/build/Heltec_v3_companion_radio_ble/firmware-merged.bin "$build_dir/dist/heltec-v3-oled-companion-echo-merged.bin"
+  variant=echo
+  if [ "$profile" = client-radio-nrf ]; then
+    git apply --check --exclude=variants/heltec_v4/platformio.ini "$repo_dir/patches/companion-radio-history.patch"
+    git apply --exclude=variants/heltec_v4/platformio.ini "$repo_dir/patches/companion-radio-history.patch"
+    test_radio_history
+    export PLATFORMIO_BUILD_FLAGS="-D ENABLE_COMPANION_RADIO_NOISE -D FIRMWARE_VERSION='\"v1.18.0-radio.1\"'"
+    variant=radio-history
+  else
+    pio run -e Heltec_v3_companion_radio_ble -t mergebin
+    cp .pio/build/Heltec_v3_companion_radio_ble/firmware.bin "$build_dir/dist/heltec-v3-oled-companion-echo-app.bin"
+    cp .pio/build/Heltec_v3_companion_radio_ble/firmware-merged.bin "$build_dir/dist/heltec-v3-oled-companion-echo-merged.bin"
+  fi
 
   pio run -e ProMicro_companion_radio_ble -t create_uf2
-  cp .pio/build/ProMicro_companion_radio_ble/firmware.uf2 "$build_dir/dist/faketec-v4-promicro-companion-echo.uf2"
+  cp .pio/build/ProMicro_companion_radio_ble/firmware.uf2 "$build_dir/dist/faketec-v4-promicro-companion-$variant.uf2"
 
   pio run -e RAK_4631_companion_radio_ble -t create_uf2
-  cp .pio/build/RAK_4631_companion_radio_ble/firmware.uf2 "$build_dir/dist/rak4631-companion-echo.uf2"
+  cp .pio/build/RAK_4631_companion_radio_ble/firmware.uf2 "$build_dir/dist/rak4631-companion-$variant.uf2"
 
   cd "$build_dir/dist"
-  shasum -a 256 ./*.bin ./*.uf2 > SHA256SUMS
+  shasum -a 256 ./* > "$build_dir/SHA256SUMS"
+  mv "$build_dir/SHA256SUMS" SHA256SUMS
   mkdir -p "$repo_dir/dist/$profile"
-  cp ./*.bin ./*.uf2 SHA256SUMS "$repo_dir/dist/$profile/"
+  cp ./* "$repo_dir/dist/$profile/"
   exit 0
 fi
 
