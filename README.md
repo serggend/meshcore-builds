@@ -30,6 +30,14 @@
 
 При обновлении проверь разметку разделов и сохрани резервную копию по инструкции для Heltec V4 OLED ниже.
 
+### История эфира для FakeTec V4 и RAK4631
+
+Предварительная прошивка `v1.18.0-radio.1` для мобильных BLE Companion на nRF52840. MeshConnect 0.1.79 читает до часа сводок эфира из RAM ноды. Сборки и формат UF2 проверены. Установка и догрузка истории по BLE на этих платах ещё не проверялись. [Описание выпуска](https://github.com/serggend/meshcore-builds/releases/tag/v0.5.0-preview.2)
+
+- [FakeTec V4 на ProMicro nRF52840 + HT-RA62](https://github.com/serggend/meshcore-builds/releases/download/v0.5.0-preview.2/faketec-v4-promicro-companion-radio-history.uf2)
+- [RAK4631 WisBlock](https://github.com/serggend/meshcore-builds/releases/download/v0.5.0-preview.2/rak4631-companion-radio-history.uf2)
+- [Контрольные суммы](https://github.com/serggend/meshcore-builds/releases/download/v0.5.0-preview.2/SHA256SUMS)
+
 ### BLE Companion для Heltec V3 OLED, FakeTec V4 и RAK4631
 
 Тот же патч длинного эха на базе штатных профилей MeshCore 1.18.0. Проверены сборка и формат файлов. Эфирный тест для этой версии патча проведён на Heltec V4.3 OLED. [Выпуск и контрольные суммы](https://github.com/serggend/meshcore-builds/releases/tag/v0.4.0-preview.2)
@@ -131,6 +139,7 @@ python -m pip install platformio==6.2.0
 ./scripts/build.sh client
 ./scripts/build.sh client-ble
 ./scripts/build.sh client-radio
+./scripts/build.sh client-radio-nrf
 ```
 
 Профиль `client` применяет [профиль Heltec V4 BLE/USB/Wi-Fi](patches/heltec-v4-companion-all.patch) и [исправление журнала приёма](patches/companion-rx-log.patch), затем кладёт файлы в `dist/client/`.
@@ -138,6 +147,8 @@ python -m pip install platformio==6.2.0
 Профиль `client-ble` собирает три BLE Companion из таблицы выше в `dist/client-ble/` с тем же исправлением журнала приёма.
 
 Профиль `client-radio` добавляет к `client` [патч истории эфира](patches/companion-radio-history.patch) и проверяет буфер сводок с ASan и UBSan. Результат сохраняется в `dist/client-radio/`.
+
+Профиль `client-radio-nrf` применяет тот же патч истории к BLE Companion для FakeTec V4 и RAK4631. Оба UF2 сохраняются в `dist/client-radio-nrf/`.
 
 Нужны Git, curl и компилятор C++ с ASan и UBSan. [Сборки GitHub Actions](https://github.com/serggend/meshcore-builds/actions)
 
